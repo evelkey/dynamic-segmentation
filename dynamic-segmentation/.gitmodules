@@ -1,0 +1,10 @@
+
+[submodule "tensorflow"]
+	path = tensorflow
+	url = https://github.com/tensorflow/tensorflow
+	branch = r1.0
+
+[submodule "tensorflow_fold"]
+	path = teensorflow_fold
+	url = https://github.com/tensorflow/fold
+	branch = master

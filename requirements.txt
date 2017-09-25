@@ -1,0 +1,2 @@
+tf-nightly-gpu==1.4.0.dev20170925
+numpy==1.13.1
