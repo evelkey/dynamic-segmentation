@@ -1,0 +1,9 @@
+/.idea/
+*.pyc
+__pycache__/
+/.project/
+.coverage
+/htmlcov/
+/doc/
+/build/
+/fold/

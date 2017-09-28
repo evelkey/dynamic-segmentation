@@ -1,2 +1,3 @@
-tf-nightly-gpu==1.4.0.dev20170925
+tensorflow-gpu==1.0.0
 numpy==1.13.1
+tensorflow-fold==0.0.1

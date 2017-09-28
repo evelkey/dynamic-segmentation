@@ -5,6 +5,6 @@
 	branch = r1.0
 
 [submodule "tensorflow_fold"]
-	path = teensorflow_fold
+	path = fold
 	url = https://github.com/tensorflow/fold
 	branch = master
