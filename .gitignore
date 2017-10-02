@@ -6,5 +6,9 @@ __pycache__/
 /htmlcov/
 /doc/
 /build/
-/fold/
+/fold
+/dynamic-segmentation/pytorch/__pycache__/
+/dynamic-segmentation/pytorch/.ipynb_checkpoints/
+/dynamic-segmentation/tf_fold/__pycache__/
+/dynamic-segmentation/tf_fold/.ipynb_checkpoints/
 /dynamic-segmentation/pytorch/data/
