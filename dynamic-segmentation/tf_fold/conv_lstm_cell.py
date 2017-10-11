@@ -17,7 +17,7 @@
 # !! MOVED from tensorflow master to be able to use convolutional LSTM cells
 
 """Module for constructing RNN Cells."""
-
+import tensorflow as tf
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import init_ops
@@ -185,15 +185,20 @@ def _conv(args,
       filter_size + [total_arg_size_depth, num_features],
       dtype=dtype)
   if len(args) == 1:
-    res = conv_op(args[0],
-                  kernel,
-                  strides,
-                  padding='SAME')
+    incucc = tf.Print(args[0], tf.shape(args[0]))
+    res = conv_op(incucc, kernel, strides, padding='SAME')
+    
   else:
-    res = conv_op(array_ops.concat(axis=shape_length-1, values=args),
-                  kernel,
-                  strides,
-                  padding='SAME')
+    input_tensor = array_ops.concat(axis=shape_length-1, values=args)
+    depth_batch_size = tf.shape(input_tensor)[0]
+    input_tensor = tf.Print(input_tensor, [tf.shape(input_tensor)[0]])
+    inshape = tf.shape(input_tensor)
+
+    outshape = [inshape[0], inshape[1], tf.shape(kernel)[-1]]
+
+    res = tf.cond(tf.equal(depth_batch_size, 0),
+                  lambda: tf.zeros(outshape),#conv_op(input_tensor, kernel, strides, padding='SAME'),
+                  lambda: conv_op(input_tensor, kernel, strides, padding='SAME'))
   if not bias:
     return res
   bias_term = vs.get_variable(

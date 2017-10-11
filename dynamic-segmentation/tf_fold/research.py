@@ -4,7 +4,7 @@
 # # Dynet segmentation with tf fold
 # ![animation](../../fold/tensorflow_fold/g3doc/animation.gif)  
 
-# In[2]:
+# In[1]:
 
 
 #just a bunch of fun
@@ -37,13 +37,13 @@ char = lambda i: vocabulary[i]
 
 
 
-# In[3]:
+# In[2]:
 
 
 class reader():
-    def __init__(self, folder, mode="bidirectional", qsize=1000, start=True):
+    def __init__(self, folder, mode="bidirectional", qsize=10000, start=True):
         self.data_dir = folder
-        self.qsize= 10000
+        self.qsize= qsize
         self.pool = dict()
         self.data = dict()
         self.datasets = ["train", "test", "validation"]
@@ -111,8 +111,8 @@ class reader():
                         for i in range(1, len(sent)-1):
                             forward, backward = sent[:i], sent[i:][::-1]
                             queue.put(([self.onehot(forward), self.onehot(backward)], tags[i]))
-                    except e:
-                        print(e)
+                    except:
+                        print("err")
                         
     def start(self):
         for dataset in self.datasets:
@@ -133,12 +133,12 @@ class reader():
         onehot[np.arange(len(string)), np.array([index(char) for char in string])]=1
         return [onehot[i,:] for i in range(len(onehot))]
             
-store = reader("/home/moon/data/", start=False)
+store = reader("/home/moon/data/",start=False)
 
 
 # ## helper functions
 
-# In[4]:
+# In[3]:
 
 
 def params_info():
@@ -163,29 +163,24 @@ def onehot(string):
     return [onehot[i,:] for i in range(len(onehot))]
 
 
+# In[4]:
+
+
+#cell = td.ScopedLayer(tf.contrib.rnn.BasicLSTMCell(num_units=16), 'char_cell')
+
+
 # In[5]:
 
 
-cell = td.ScopedLayer(tf.contrib.rnn.BasicLSTMCell(num_units=16), 'char_cell')
-convlstm = Conv1DLSTMCell(input_shape=[vsize,1], output_channels=8, kernel_shape=[5])
-conv_lstm_cell_1d = td.ScopedLayer(convlstm)
-
-
-# In[38]:
-
-
 def bidirectional_conv_LSTM():
+    convlstm = Conv1DLSTMCell(input_shape=[vsize,1], output_channels=8, kernel_shape=[5])
+    conv_lstm_cell_1d = td.ScopedLayer(convlstm)
+
     bidir_conv_lstm = td.Composition()
     with bidir_conv_lstm.scope():
-        data = td.Record((td.Map(
-                                td.Vector(vsize) >>
-                                td.Function(lambda x: tf.reshape(x, [-1,vsize,1]))),
-                          td.Map(
-                                td.Vector(vsize) >>
-                                td.Function(lambda x: tf.reshape(x, [-1,vsize,1]))))).reads(bidir_conv_lstm.input)
 
-        forward = td.Identity().reads(data[0])
-        backward = td.Identity().reads(data[1])
+        forward = td.Identity().reads(bidir_conv_lstm.input[0])
+        backward = td.Identity().reads(bidir_conv_lstm.input[1])
 
         forw = (td.RNN(conv_lstm_cell_1d) >>
                 td.GetItem(1) >>
@@ -199,37 +194,36 @@ def bidirectional_conv_LSTM():
 
         rnn_outs = td.Concat().reads(forw,backw)
         bidir_conv_lstm.output.reads(rnn_outs)
-    return bidir_conv_lstm
+    return bidir_conv_lstm >> td.FC(1)
 
 
 def FCNN():
-    return td.FC(400) >> td.FC(50) >> td.FC(1)
+    return td.FC(50) >> td.FC(1)# >> td.Function(lambda xs: tf.squeeze(xs, axis=1))
 
-bidir = bidirectional_conv_LSTM()
-fc = FCNN()
-blk = bidir >> fc 
-#blk.eval([a,a])
+data = td.Record((td.Map(
+                        td.Vector(vsize) >>
+                        td.Function(lambda x: tf.reshape(x, [-1,vsize,1]))),
+                  td.Map(
+                        td.Vector(vsize) >>
+                        td.Function(lambda x: tf.reshape(x, [-1,vsize,1])))))
+bidir =  data >> bidirectional_conv_LSTM()
+#fc = FCNN()
+blk = bidir# >> fc 
 
 
-# In[39]:
+# In[6]:
 
 
 compiler = td.Compiler.create((blk, td.Scalar()))
 model_output, target = compiler.output_tensors
 loss = tf.nn.l2_loss(model_output - target)
-train_op = tf.train.GradientDescentOptimizer(learning_rate=0.001).minimize(loss)
+opt = tf.train.AdamOptimizer(learning_rate=0.001)
+train_op = opt.minimize(loss)
+sess.run(tf.global_variables_initializer())
 
 
-# In[8]:
 
-
-a = onehot("asa pssdf sadf adsf adfsad")
-b = onehot("trhko daf  sdf sd")
-blk.eval([a,a])
-#store.stop()
-
-
-# In[69]:
+# In[ ]:
 
 
 sess.run(tf.global_variables_initializer())
@@ -237,6 +231,18 @@ sess.run(tf.global_variables_initializer())
 
 # In[ ]:
 
+"""
+losses = []
+for i in range(1000):
+    loff, _ = sess.run([loss, train_op], compiler.build_feed_dict([store.get("train") for _ in range(100)]))
+    losses.append(loss)
+    if i%10==0:
+        print(loff)
+"""
 
-sess.run([loss, train_op], compiler.build_feed_dict([([b,b], 1.0) for _ in range(5)]))
-
+# In[ ]:
+sess.run(tf.global_variables_initializer())
+for i in range(10000):
+    lof, _ = sess.run([loss, train_op], compiler.build_feed_dict([([onehot("egsdafasd y"), onehot("v asfd am")], 0.7) for _ in range(1000)]))
+    print(lof)
+#store.stop()
