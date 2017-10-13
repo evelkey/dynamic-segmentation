@@ -241,8 +241,10 @@ for i in range(1000):
 """
 
 # In[ ]:
+x = ([onehot("sadfasdfasd asdfas daf"), onehot("asdfasdf sdcfsd bdfovk")], 0.8)
+fd = compiler.build_feed_dict([x for _ in range(1000)])
 sess.run(tf.global_variables_initializer())
 for i in range(10000):
-    lof, _ = sess.run([loss, train_op], compiler.build_feed_dict([([onehot("egsdafasd y"), onehot("v asfd am")], 0.7) for _ in range(1000)]))
+    lof, _ = sess.run([loss, train_op], fd)
     print(lof)
 #store.stop()
