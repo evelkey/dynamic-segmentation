@@ -20,7 +20,7 @@ from conv_lstm_cell import *
 # params
 EMBEDDING_SIZE = 64
 SEP = "|"
-BATCH_SIZE = 100
+BATCH_SIZE = 8
 data_dir = "/mnt/permanent/Home/nessie/velkey/data/"
 
 #our alphabet
@@ -173,46 +173,79 @@ def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
     return bidir_conv_lstm
 
 
-data = td.Map(td.Vector(vsize) >> td.Function(lambda x: tf.reshape(x, [-1,vsize,1])))
-model =  data >> bidirectional_dynamic_CONV(convLSTM_cell(vsize), convLSTM_cell(vsize)) >> td.Void()
-labels = td.Map(td.Scalar() >> td.Metric("labels")) >> td.Void()
+CONV_data = td.Map(td.Vector(vsize) >> td.Function(lambda x: tf.reshape(x, [-1,vsize,1])))
+CONV_model =  CONV_data >> bidirectional_dynamic_CONV(convLSTM_cell(vsize), convLSTM_cell(vsize)) >> td.Void()
+#labels = td.Map(td.Scalar() >> td.Metric("labels")) >> td.Void()
 
 FC_data = td.Map(td.Vector(vsize))#>> td.Function(lambda x: tf.reshape(x, [-1,vsize])))
 FC_model = FC_data >> bidirectional_dynamic_FC(multi_FC_cell([100]), multi_FC_cell([100]),100) >>td.Void()
 
 
 
-compiler = td.Compiler.create((FC_model, labels))
+
+
+
+
+def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
+    bidir_conv_lstm = td.Composition()
+    with bidir_conv_lstm.scope():        
+        fw_seq = td.Identity().reads(bidir_conv_lstm.input[0])
+        labels = (td.GetItem(1)>>td.Map(td.Metric("labels"))>>td.Void()).reads(bidir_conv_lstm.input)
+        bw_seq = td.Slice(step=-1).reads(fw_seq)
+
+        forward_dir = (td.RNN(fw_cell) >> td.GetItem(0)).reads(fw_seq)
+        back_dir = (td.RNN(bw_cell) >> td.GetItem(0)).reads(bw_seq)
+        back_to_leftright = td.Slice(step=-1).reads(back_dir)
+        
+        output_transform = td.FC(1, activation=tf.nn.sigmoid)
+        
+        bidir_common = (td.ZipWith(td.Concat() >> 
+                                  output_transform >> td.Metric('logits'))).reads(forward_dir, back_to_leftright)
+        
+        bidir_conv_lstm.output.reads(bidir_common)
+    return bidir_conv_lstm
+
+d = td.Record((td.Map(td.Vector(vsize)),td.Map(td.Scalar())))
+f = d >> bidirectional_dynamic_FC(multi_FC_cell([1000]), multi_FC_cell([1000]),1000) >>td.Void()
+
+
+
+
+compiler = td.Compiler.create(f)
 logits = tf.squeeze(compiler.metric_tensors['logits'])
 labels = compiler.metric_tensors['labels']
 
-loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
+l1_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 l2_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
-log_loss = (labels) * tf.log(logits) + (1 - labels) * tf.log(1 - logits)
-#cross_entropy_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels)
-best_loss =  labels * -tf.log(logits) + (1 - labels) * -tf.log(1 - logits)
-#TODO data label distribution analysis for determining the better best lost ;)
+cross_entropy_tf = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels)
+cross_entropy =  tf.reduce_mean(labels * -tf.log(logits) + (1 - labels) * -tf.log(1 - logits))
+#TODO data label distribution analysis for determining the best loss
+
+loss = cross_entropy
+
+writer = tf.summary.FileWriter("/mnt/permanent/Home/nessie/velkey/logs/cross_entropy_b8_c1000", graph=tf.get_default_graph())
+tf.summary.scalar("loss", loss)
+acc = tf.reduce_sum(tf.cast(tf.equal(tf.less(0.5,logits), tf.cast(labels, tf.bool)),tf.int32))*100/tf.size(logits)
+tf.summary.scalar("accuracy", acc)
+
+                  
+summary_op = tf.summary.merge_all()
 
 
 opt = tf.train.AdamOptimizer(learning_rate=0.001)
-train_op = opt.minimize(best_loss)
+train_op = opt.minimize(loss)
 sess.run(tf.global_variables_initializer())
 
 
-
 sess.run(tf.global_variables_initializer())
+sess.run(tf.local_variables_initializer())
 #feed = compiler.build_feed_dict([(onehot("naGon jó ötlet"),[0,0,0,1,0,1,0,0,0,0,0,1,0,0]) for i in range(1)])C
-x = next(store.data["train"])
-x = next(store.data["train"])
-print(x)
-exit()
-feed = compiler.build_feed_dict([x for _ in range(BATCH_SIZE)])
+#feed = compiler.build_feed_dict([next(store.data["train"]) for _ in range(BATCH_SIZE)])
 for i in range(100000):
-    a,b,c,d= sess.run([logits, compiler.metric_tensors['labels'], loss, train_op], feed) #compiler.build_feed_dict([next(store.data["train"]) for _ in range(BATCH_SIZE)]))
+    a,b,c,d, accu, summ= sess.run([logits, labels, loss, train_op, acc, summary_op], compiler.build_feed_dict([next(store.data["train"]) for _ in range(BATCH_SIZE)]))
+    writer.add_summary(summ,i)
     print("step: ", i)
     print("preds: ", a)
     print("labels: ", b)
     print("loss: ", c, '\n')
-    accuracy=a > 0.5
-    print("accuracy: ", np.sum(np.equal(accuracy,b))/len(accuracy)*100, "%")
-
+    print("accuracy: ", accu, "%")
