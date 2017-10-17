@@ -1,10 +1,6 @@
-
 # coding: utf-8
 
 # # Dynet segmentation with tf fold
-# ![animation](../../fold/tensorflow_fold/g3doc/animation.gif)  
-
-# In[1]:
 
 
 #just a bunch of fun
@@ -37,8 +33,6 @@ index = lambda char: vocabulary.index(char)
 char = lambda i: vocabulary[i]
 
 
-
-# In[3]:
 
 
 class data():
@@ -96,13 +90,10 @@ class data():
         onehot[indices]=1
         return [onehot[i,:] for i in range(len(onehot))]
             
-store = data("/mnt/permanent/Home/nessie/velkey/data")
+store = data("/mnt/permanent/Home/nessie/velkey/data/")
 
 
 # ## helper functions
-
-# In[4]:
-
 
 def params_info():
     total_parameters = 0
@@ -125,16 +116,6 @@ def onehot(string):
     onehot[np.arange(len(string)), np.array([index(char) for char in string])]=1
     return [onehot[i,:] for i in range(len(onehot))]
 
-
-# In[5]:
-
-
-get_ipython().system('nvidia-smi')
-
-
-# In[6]:
-
-
 def convLSTM_cell(kernel_size, out_features = 64):
     convlstm = Conv1DLSTMCell(input_shape=[vsize,1], output_channels=out_features, kernel_shape=[kernel_size])
     return td.ScopedLayer(convlstm)
@@ -142,8 +123,14 @@ def convLSTM_cell(kernel_size, out_features = 64):
 def multi_convLSTM_cell(kernel_sizes, out_features):
     stacked_convLSTM = tf.contrib.rnn.MultiRNNCell()
     return td.ScopedLayer(stacked_convLSTM)
+
+def FC_cell(units):
+    return td.ScopedLayer(tf.contrib.rnn.LSTMCell(num_units=units))
+
+def multi_FC_cell(units_list):
+    return td.ScopedLayer(tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.LSTMCell(num_units=units) for units in units_list]))
     
-def bidirectional_dynamic_nn(fw_cell, bw_cell, out_features=64):
+def bidirectional_dynamic_CONV(fw_cell, bw_cell, out_features=64):
     bidir_conv_lstm = td.Composition()
     with bidir_conv_lstm.scope():        
         fw_seq = td.Identity().reads(bidir_conv_lstm.input)
@@ -166,42 +153,66 @@ def bidirectional_dynamic_nn(fw_cell, bw_cell, out_features=64):
         bidir_conv_lstm.output.reads(bidir_common)
     return bidir_conv_lstm
 
+def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
+    bidir_conv_lstm = td.Composition()
+    with bidir_conv_lstm.scope():        
+        fw_seq = td.Identity().reads(bidir_conv_lstm.input)
+        bw_seq = td.Slice(step=-1).reads(fw_seq)
+
+        forward_dir = (td.RNN(fw_cell) >> td.GetItem(0)).reads(fw_seq)
+        back_dir = (td.RNN(bw_cell) >> td.GetItem(0)).reads(bw_seq)
+        back_to_leftright = td.Slice(step=-1).reads(back_dir)
+        
+        output_transform = td.FC(1, activation=tf.nn.sigmoid)
+        
+        bidir_common = (td.ZipWith(td.Concat() >> 
+                                  output_transform >> 
+                                  td.Metric('logits'))).reads(forward_dir, back_to_leftright)
+
+        bidir_conv_lstm.output.reads(bidir_common)
+    return bidir_conv_lstm
+
 
 data = td.Map(td.Vector(vsize) >> td.Function(lambda x: tf.reshape(x, [-1,vsize,1])))
-
-model =  data >> bidirectional_dynamic_nn(convLSTM_cell(vsize), convLSTM_cell(vsize)) >> td.Void()
+model =  data >> bidirectional_dynamic_CONV(convLSTM_cell(vsize), convLSTM_cell(vsize)) >> td.Void()
 labels = td.Map(td.Scalar() >> td.Metric("labels")) >> td.Void()
 
+FC_data = td.Map(td.Vector(vsize))#>> td.Function(lambda x: tf.reshape(x, [-1,vsize])))
+FC_model = FC_data >> bidirectional_dynamic_FC(multi_FC_cell([100]), multi_FC_cell([100]),100) >>td.Void()
 
-# In[7]:
 
 
-compiler = td.Compiler.create((model, labels))
+compiler = td.Compiler.create((FC_model, labels))
 logits = tf.squeeze(compiler.metric_tensors['logits'])
 labels = compiler.metric_tensors['labels']
 
 loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 l2_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 log_loss = (labels) * tf.log(logits) + (1 - labels) * tf.log(1 - logits)
-cross_entropy_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels)
+#cross_entropy_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels)
+best_loss =  labels * -tf.log(logits) + (1 - labels) * -tf.log(1 - logits)
+#TODO data label distribution analysis for determining the better best lost ;)
 
-
-preds = tf.nn.sigmoid(logits)
 
 opt = tf.train.AdamOptimizer(learning_rate=0.001)
-train_op = opt.minimize(cross_entropy_loss)
+train_op = opt.minimize(best_loss)
 sess.run(tf.global_variables_initializer())
 
 
-# In[8]:
-
 
 sess.run(tf.global_variables_initializer())
-feed = compiler.build_feed_dict([(onehot("naGon jó ötlet"),[0,0,0,1,0,1,0,0,0,0,0,1,0,0]) for i in range(1)])
-#feed = compiler.build_feed_dict([next(store.data["train"]) for _ in range(5)])
-for i in range(1000):
-    a,b,c,d= sess.run([preds, compiler.metric_tensors['labels'], loss, train_op], feed)
+#feed = compiler.build_feed_dict([(onehot("naGon jó ötlet"),[0,0,0,1,0,1,0,0,0,0,0,1,0,0]) for i in range(1)])C
+x = next(store.data["train"])
+x = next(store.data["train"])
+print(x)
+exit()
+feed = compiler.build_feed_dict([x for _ in range(BATCH_SIZE)])
+for i in range(100000):
+    a,b,c,d= sess.run([logits, compiler.metric_tensors['labels'], loss, train_op], feed) #compiler.build_feed_dict([next(store.data["train"]) for _ in range(BATCH_SIZE)]))
+    print("step: ", i)
     print("preds: ", a)
     print("labels: ", b)
     print("loss: ", c, '\n')
+    accuracy=a > 0.5
+    print("accuracy: ", np.sum(np.equal(accuracy,b))/len(accuracy)*100, "%")
 
