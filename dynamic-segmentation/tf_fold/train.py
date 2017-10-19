@@ -18,8 +18,6 @@ import tensorflow_fold as td
 from conv_lstm_cell import *
 
 # params
-EMBEDDING_SIZE = 64
-SEP = "|"
 BATCH_SIZE = 8
 data_dir = "/mnt/permanent/Home/nessie/velkey/data/"
 
@@ -33,10 +31,8 @@ index = lambda char: vocabulary.index(char)
 char = lambda i: vocabulary[i]
 
 
-
-
 class data():
-    def __init__(self, folder, truncate=100):
+    def __init__(self, folder, truncate=500):
         self.data_dir = folder
         self.data = dict()
         self.size = dict()
@@ -52,36 +48,15 @@ class data():
         """
         read sentences from the data format setence: word\tword\n.....\t\n
         """
-        while True:
-            i=0
-            sentence = []
-            end_sentence = False
-            with open(file) as f:
-                for lines in f:
-                    line = lines[:-1].split('\t')
-                    if line[0] != "":
-                        sentence.append(line)
-                    else:
-                        end_sentence = True
-                        i+=1
-                    if end_sentence:
-                        end_sentence = False
-                        sent = " ".join([word[0] for word in sentence])
-                        segmented = " ".join([word[1].replace(" ","|") for word in sentence])
-                        tags = []
-                        last_char = "_"
-                        for char in segmented:
-                            if char != "|":
-                                tags.append(0 if last_char!="|" else 1)
-                            last_char = char
-                        if len(sent) != 0:
-                            sent_onehot = self.onehot(sent)
-                            if len(sent_onehot) == len(tags):
-                                if len(sent_onehot) >= self.truncate:
-                                    sent_onehot=sent_onehot[:self.truncate]
-                                    tags = tags[:self.truncate]
-                                yield (sent_onehot, tags)
-                            sentence = []      
+        data = [line[:-1].split('\t') for line in open(file)]
+        for item in data:
+            tags = [int(num) for num in item[1]]
+            if len(item[0]) == len(tags) and len(tags) != 0:
+                sent_onehot = self.onehot(item[0])
+                if len(sent_onehot) >= self.truncate:
+                    sent_onehot=sent_onehot[:self.truncate]
+                    tags = tags[:self.truncate]
+                yield (sent_onehot, tags)    
           
             
     def onehot(self, string):
@@ -206,7 +181,7 @@ def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
     return bidir_conv_lstm
 
 d = td.Record((td.Map(td.Vector(vsize)),td.Map(td.Scalar())))
-f = d >> bidirectional_dynamic_FC(multi_FC_cell([1000]), multi_FC_cell([1000]),1000) >>td.Void()
+f = d >> bidirectional_dynamic_FC(multi_FC_cell([1000,1000,1000,1000,1000]), multi_FC_cell([1000,1000,1000,1000,1000]),1000) >>td.Void()
 
 
 
@@ -218,15 +193,17 @@ labels = compiler.metric_tensors['labels']
 l1_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 l2_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 cross_entropy_tf = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels)
-cross_entropy =  tf.reduce_mean(labels * -tf.log(logits) + (1 - labels) * -tf.log(1 - logits))
+cross_entropy =  tf.reduce_mean(labels * - tf.log(logits + 0.00001) + (1 - labels) * - tf.log(1 - logits - 0.00001))
 #TODO data label distribution analysis for determining the best loss
 
 loss = cross_entropy
 
-writer = tf.summary.FileWriter("/mnt/permanent/Home/nessie/velkey/logs/cross_entropy_b8_c1000", graph=tf.get_default_graph())
-tf.summary.scalar("loss", loss)
+path = "/mnt/permanent/Home/nessie/velkey/logs/cross_entropy_b8_c5x1000_v0"
+writer = tf.summary.FileWriter(path, graph=tf.get_default_graph())
+saver = tf.train.Saver()
+tf.summary.scalar("batch_loss", loss)
 acc = tf.reduce_sum(tf.cast(tf.equal(tf.less(0.5,logits), tf.cast(labels, tf.bool)),tf.int32))*100/tf.size(logits)
-tf.summary.scalar("accuracy", acc)
+tf.summary.scalar("batch_accuracy", acc)
 
                   
 summary_op = tf.summary.merge_all()
@@ -241,11 +218,38 @@ sess.run(tf.global_variables_initializer())
 sess.run(tf.local_variables_initializer())
 #feed = compiler.build_feed_dict([(onehot("naGon jó ötlet"),[0,0,0,1,0,1,0,0,0,0,0,1,0,0]) for i in range(1)])C
 #feed = compiler.build_feed_dict([next(store.data["train"]) for _ in range(BATCH_SIZE)])
-for i in range(100000):
-    a,b,c,d, accu, summ= sess.run([logits, labels, loss, train_op, acc, summary_op], compiler.build_feed_dict([next(store.data["train"]) for _ in range(BATCH_SIZE)]))
+"""
+for i in range(54000):
+    a,b,c,d, accu, summ = sess.run([logits, labels, loss, train_op, acc, summary_op], compiler.build_feed_dict([next(store.data["train"]) for _ in range(BATCH_SIZE)]))
     writer.add_summary(summ,i)
+    assert not np.isnan(c)
     print("step: ", i)
     print("preds: ", a)
     print("labels: ", b)
     print("loss: ", c, '\n')
     print("accuracy: ", accu, "%")
+    
+    if i % 1000:
+        save_path = saver.save(sess, path, global_step=i)
+"""
+num_epochs = 10
+
+train_set = compiler.build_loom_inputs(store.data["train"])
+dev_feed_dict = compiler.build_feed_dict(store.data["validation"])
+test_feed_dict = compiler.build_feed_dict(store.data["test"])
+train_feed_dict = {}
+i=0
+for epoch, shuffled in enumerate(td.epochs(train_set, num_epochs), 1):
+    train_loss = 0.0
+    for batch in td.group_by_batches(shuffled, BATCH_SIZE):
+        train_feed_dict[compiler.loom_input_tensor] = batch
+        _, batch_loss, summary = sess.run([train_op, loss, summary_op], train_feed_dict)
+        #print(batch_#loss)
+        assert not np.isnan(batch_loss)
+        writer.add_summary(summary, i)
+        i += 1
+        train_loss += batch_loss
+    dev_loss = sess.run([loss], dev_feed_dict)
+    print("DEV loss: ", dev_loss)
+    save_path = saver.save(sess, path, global_step=i)
+    
