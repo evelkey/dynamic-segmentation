@@ -1,15 +1,8 @@
 # coding: utf-8
-
-# # Dynet segmentation with tf fold
-
-
-#just a bunch of fun
 import numpy as np
-import six
-import time
-from multiprocessing import Process, Queue
 import time
 import data
+import tqdm
 import tensorflow as tf
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
@@ -17,13 +10,20 @@ sess = tf.InteractiveSession(config=config)
 import tensorflow_fold as td
 from conv_lstm_cell import *
 
-# params
-BATCH_SIZE = 8
-data_dir = "/mnt/permanent/Home/nessie/velkey/data/"
 
-#our alphabet
+FLAGS = tf.app.flags.FLAGS
+tf.app.flags.DEFINE_integer('batch_size', 8, """batchsize""")
+tf.app.flags.DEFINE_integer('epochs', 2, """epoch count""")
+tf.app.flags.DEFINE_string('data_dir', "/mnt/permanent/Home/nessie/velkey/data/", """data store basedir""")
+tf.app.flags.DEFINE_string('log_dir', "/mnt/permanent/Home/nessie/velkey/logs/", """logging directory root""")
+tf.app.flags.DEFINE_string('run_name', "development", """naming: loss_fn, batch size, 
+                                                         architecture, optimizer""")
+tf.app.flags.DEFINE_string('data_type', "sentence/", """can be sentence/, word/""")
+tf.app.flags.DEFINE_string('model', "lstm", """can be lstm, convlstm right now""")
+tf.app.flags.DEFINE_float('learning_rate', 0.1, """starting learning rate""")
 
-vocabulary = data.vocabulary(data_dir + 'vocabulary')
+
+vocabulary = data.vocabulary(FLAGS.data_dir + 'vocabulary')
 vsize=len(vocabulary)
 print(vocabulary)
 
@@ -32,7 +32,7 @@ char = lambda i: vocabulary[i]
 
 
 class data():
-    def __init__(self, folder, truncate=500):
+    def __init__(self, folder, truncate=120):
         self.data_dir = folder
         self.data = dict()
         self.size = dict()
@@ -41,7 +41,7 @@ class data():
         
         for dataset in self.datasets:
             self.data[dataset] = self.sentence_reader(folder+dataset)
-            #self.size[dataset] = sum(1 for line in open(folder+dataset))
+            self.size[dataset] = sum(1 for line in open(folder+dataset))
 
                         
     def sentence_reader(self, file):
@@ -49,26 +49,22 @@ class data():
         read sentences from the data format setence: word\tword\n.....\t\n
         """
         data = [line[:-1].split('\t') for line in open(file)]
-        for item in data:
-            tags = [int(num) for num in item[1]]
-            if len(item[0]) == len(tags) and len(tags) != 0:
-                sent_onehot = self.onehot(item[0])
-                if len(sent_onehot) >= self.truncate:
-                    sent_onehot=sent_onehot[:self.truncate]
-                    tags = tags[:self.truncate]
-                yield (sent_onehot, tags)    
-          
+        while True:
+            for item in data:
+                tags = [int(num) for num in item[1]]
+                if len(item[0]) == len(tags) and len(tags) != 0:
+                    sent_onehot = self.onehot(item[0])
+                    if len(sent_onehot) >= self.truncate:
+                        sent_onehot=sent_onehot[:self.truncate]
+                        tags = tags[:self.truncate]
+                    yield (sent_onehot, tags)    
+
             
     def onehot(self, string):
         onehot = np.zeros([len(string),vsize])
         indices = np.arange(len(string)), np.array([int(index(char)) for char in string])
         onehot[indices]=1
         return [onehot[i,:] for i in range(len(onehot))]
-            
-store = data("/mnt/permanent/Home/nessie/velkey/data/")
-
-
-# ## helper functions
 
 def params_info():
     total_parameters = 0
@@ -180,8 +176,11 @@ def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
         bidir_conv_lstm.output.reads(bidir_common)
     return bidir_conv_lstm
 
+store = data(FLAGS.data_dir + FLAGS.data_type)
+
+
 d = td.Record((td.Map(td.Vector(vsize)),td.Map(td.Scalar())))
-f = d >> bidirectional_dynamic_FC(multi_FC_cell([1000,1000,1000,1000,1000]), multi_FC_cell([1000,1000,1000,1000,1000]),1000) >>td.Void()
+f = d >> bidirectional_dynamic_FC(multi_FC_cell([500]*5), multi_FC_cell([500]*5),500) >> td.Void()
 
 
 
@@ -193,63 +192,47 @@ labels = compiler.metric_tensors['labels']
 l1_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 l2_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 cross_entropy_tf = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels)
-cross_entropy =  tf.reduce_mean(labels * - tf.log(logits + 0.00001) + (1 - labels) * - tf.log(1 - logits - 0.00001))
+cross_entropy =  tf.reduce_mean(labels * - tf.log(logits) + (1 - labels) * - tf.log(1 - logits))
 #TODO data label distribution analysis for determining the best loss
 
 loss = cross_entropy
 
-path = "/mnt/permanent/Home/nessie/velkey/logs/cross_entropy_b8_c5x1000_v0"
+path = FLAGS.log_dir + FLAGS.run_name
 writer = tf.summary.FileWriter(path, graph=tf.get_default_graph())
 saver = tf.train.Saver()
 tf.summary.scalar("batch_loss", loss)
+
+#Accuracy
 acc = tf.reduce_sum(tf.cast(tf.equal(tf.less(0.5,logits), tf.cast(labels, tf.bool)),tf.int32))*100/tf.size(logits)
 tf.summary.scalar("batch_accuracy", acc)
 
-                  
+# Recall
+correct_trues = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(tf.less(0.5,logits), tf.cast(labels, tf.bool)), tf.cast(labels, tf.bool)), tf.int32))
+all_trues = tf.reduce_sum(labels)
+recall = tf.cast(correct_trues,tf.float32) / all_trues
+tf.summary.scalar("recall", recall)
+         
 summary_op = tf.summary.merge_all()
-
-
-opt = tf.train.AdamOptimizer(learning_rate=0.001)
+opt = tf.train.RMSPropOptimizer(learning_rate=FLAGS.learning_rate)
 train_op = opt.minimize(loss)
 sess.run(tf.global_variables_initializer())
 
-
-sess.run(tf.global_variables_initializer())
-sess.run(tf.local_variables_initializer())
-#feed = compiler.build_feed_dict([(onehot("naGon jó ötlet"),[0,0,0,1,0,1,0,0,0,0,0,1,0,0]) for i in range(1)])C
-#feed = compiler.build_feed_dict([next(store.data["train"]) for _ in range(BATCH_SIZE)])
-"""
-for i in range(54000):
-    a,b,c,d, accu, summ = sess.run([logits, labels, loss, train_op, acc, summary_op], compiler.build_feed_dict([next(store.data["train"]) for _ in range(BATCH_SIZE)]))
-    writer.add_summary(summ,i)
-    assert not np.isnan(c)
-    print("step: ", i)
-    print("preds: ", a)
-    print("labels: ", b)
-    print("loss: ", c, '\n')
-    print("accuracy: ", accu, "%")
+#def inference_on_data(sess, data_gen, compiler, ):
+#TODO automated validation and test
+#TODO Early stopping
+#TODO auto save
+#TODO word training
+#TODO command line usage
+#TODO metrics : word level accuracy, char level accuracy, recall F-score
     
-    if i % 1000:
-        save_path = saver.save(sess, path, global_step=i)
-"""
-num_epochs = 10
 
-train_set = compiler.build_loom_inputs(store.data["train"])
-dev_feed_dict = compiler.build_feed_dict(store.data["validation"])
-test_feed_dict = compiler.build_feed_dict(store.data["test"])
-train_feed_dict = {}
-i=0
-for epoch, shuffled in enumerate(td.epochs(train_set, num_epochs), 1):
-    train_loss = 0.0
-    for batch in td.group_by_batches(shuffled, BATCH_SIZE):
-        train_feed_dict[compiler.loom_input_tensor] = batch
-        _, batch_loss, summary = sess.run([train_op, loss, summary_op], train_feed_dict)
-        #print(batch_#loss)
-        assert not np.isnan(batch_loss)
+for i in tqdm.trange(FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size), unit="batches"):
+    _, batch_loss, summary = sess.run([train_op, loss, summary_op], compiler.build_feed_dict([next(store.data["train"]) for _ in range(FLAGS.batch_size)]))
+    assert not np.isnan(batch_loss)
+    if i % 5 == 0:
         writer.add_summary(summary, i)
-        i += 1
-        train_loss += batch_loss
-    dev_loss = sess.run([loss], dev_feed_dict)
-    print("DEV loss: ", dev_loss)
-    save_path = saver.save(sess, path, global_step=i)
+    if i % 1000 == 0:
+        save_path = saver.save(sess, path, global_step=i)
+    
+
     

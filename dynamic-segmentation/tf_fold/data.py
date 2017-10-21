@@ -1,3 +1,9 @@
+
+
+#########################################################################################################
+### Deprecated, please don't use!!
+################################################x########################################################
+    
 def reader(queue, file, epochs):
     for i in range(epochs):
         with open(file) as f:
@@ -37,24 +43,3 @@ def read_line(filename_queue):
     source, target = tf.decode_csv(csv_row, record_defaults=record_defaults, field_delim=SPLIT_CHAR)
     
     return {"in": source,"out": target}
-
-"""
-filenames=["data.txt"]
-filename_queue = tf.train.string_input_producer(filenames, num_epochs=1)
-data = read_line(filename_queue)
-
-
-sess.run(tf.global_variables_initializer())
-sess.run(tf.local_variables_initializer())
-coord = tf.train.Coordinator()
-threads = tf.train.start_queue_runners(sess=sess, coord=coord)
-
-while not coord.should_stop():
-    try:
-        s= sess.run(data)
-        print(s["in"].decode("utf-8"))
-    except tf.errors.OutOfRangeError:
-        break
-coord.request_stop()
-coord.join(threads)
-"""
