@@ -168,7 +168,7 @@ def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
         back_dir = (td.RNN(bw_cell) >> td.GetItem(0)).reads(bw_seq)
         back_to_leftright = td.Slice(step=-1).reads(back_dir)
         
-        output_transform = td.FC(1, activation=tf.nn.sigmoid)
+        output_transform = td.FC(1, activation=None)
         
         bidir_common = (td.ZipWith(td.Concat() >> 
                                   output_transform >> td.Metric('logits'))).reads(forward_dir, back_to_leftright)
@@ -184,15 +184,16 @@ f = d >> bidirectional_dynamic_FC(multi_FC_cell([1000]*5), multi_FC_cell([1000]*
 
 
 
-
 compiler = td.Compiler.create(f)
 logits = tf.squeeze(compiler.metric_tensors['logits'])
 labels = compiler.metric_tensors['labels']
+predictions = tf.nn.sigmoid(logits)
 
 l1_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 l2_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
-cross_entropy_tf = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels)
-cross_entropy =  tf.reduce_mean(labels * - tf.log(logits) + (1 - labels) * - tf.log(1 - logits))
+cross_entropy = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels))
+#deprecated:
+cross_entropy_unstable =  tf.reduce_mean(labels * - tf.log(predictions) + (1 - labels) * - tf.log(1 - predictions))
 
 
 loss = cross_entropy
@@ -203,11 +204,11 @@ saver = tf.train.Saver(max_to_keep=20)
 tf.summary.scalar("batch_loss", loss)
 
 #Accuracy
-acc = tf.reduce_sum(tf.cast(tf.equal(tf.less(0.5,logits), tf.cast(labels, tf.bool)),tf.int32))*100/tf.size(logits)
+acc = tf.reduce_sum(tf.cast(tf.equal(tf.less(0.5,predictions), tf.cast(labels, tf.bool)),tf.int32))*100/tf.size(labels)
 tf.summary.scalar("batch_accuracy", acc)
 
 # Recall
-correct_trues = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(tf.less(0.5,logits), tf.cast(labels, tf.bool)), tf.cast(labels, tf.bool)), tf.int32))
+correct_trues = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(tf.less(0.5, predictions), tf.cast(labels, tf.bool)), tf.cast(labels, tf.bool)), tf.int32))
 all_trues = tf.reduce_sum(labels)
 recall = tf.cast(correct_trues,tf.float32) / all_trues
 tf.summary.scalar("recall", recall)
@@ -267,11 +268,11 @@ print("loss: ", l, " accuracy: ", a, "% recall: ", r)
     
 
 #DONE remove duplicate words
-#TODO switch to more stable loss implementation (tf cross entropy)
+#DONE switch to more stable loss implementation (tf cross entropy)
 #DONE automated validation and test
 #TODO Early stopping
 #DONE auto save
 #DONE word training
-#TODO command line usage
-#TODO metrics : word level accuracy, char level accuracy, recall F-score
+#DONE command line usage
+#TODO metrics : word level accuracy, char level accuracy DONE, recall F-score
 #TODO inference ipynotebook
