@@ -199,7 +199,7 @@ loss = cross_entropy
 
 path = FLAGS.log_dir + FLAGS.run_name
 writer = tf.summary.FileWriter(path, graph=tf.get_default_graph())
-saver = tf.train.Saver()
+saver = tf.train.Saver(max_to_keep=20)
 tf.summary.scalar("batch_loss", loss)
 
 #Accuracy
@@ -218,20 +218,11 @@ train_op = opt.minimize(loss)
 sess.run(tf.global_variables_initializer())
 
 # validation summary:
-validation_loss_placeholder = tf.placeholder(tf.float32, name="validation_loss")
+validation_loss_placeholder = tf.placeholder(tf.float32, name="validation")
 validation_loss_summary = tf.summary.scalar('validation_loss', validation_loss_placeholder)
-test_loss_placeholder = tf.placeholder(tf.float32, name="test_loss")
+test_loss_placeholder = tf.placeholder(tf.float32, name="test")
 test_loss_summary = tf.summary.scalar('validation_loss', test_loss_placeholder)
 
-#TODO remove duplicate words
-#TODO switch to more stable loss implementation (tf cross entropy)
-#TODO automated validation and test
-#TODO Early stopping
-#TODO auto save
-#TODO word training
-#TODO command line usage
-#TODO metrics : word level accuracy, char level accuracy, recall F-score
-#TODO inference ipynotebook
 
 def get_metrics_on_dataset(dataset, train_step):
     loss_sum = 0
@@ -275,4 +266,12 @@ l, a, r = get_metrics_on_dataset("test")
 print("loss: ", l, " accuracy: ", a, "% recall: ", r)
     
 
-    
+#DONE remove duplicate words
+#TODO switch to more stable loss implementation (tf cross entropy)
+#DONE automated validation and test
+#TODO Early stopping
+#DONE auto save
+#DONE word training
+#TODO command line usage
+#TODO metrics : word level accuracy, char level accuracy, recall F-score
+#TODO inference ipynotebook
