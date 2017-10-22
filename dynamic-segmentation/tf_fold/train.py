@@ -20,7 +20,7 @@ tf.app.flags.DEFINE_string('run_name', "development", """naming: loss_fn, batch 
                                                          architecture, optimizer""")
 tf.app.flags.DEFINE_string('data_type', "sentence/", """can be sentence/, word/""")
 tf.app.flags.DEFINE_string('model', "lstm", """can be lstm, convlstm right now""")
-tf.app.flags.DEFINE_float('learning_rate', 0.1, """starting learning rate""")
+tf.app.flags.DEFINE_float('learning_rate', 0.001, """starting learning rate""")
 
 
 vocabulary = data.vocabulary(FLAGS.data_dir + 'vocabulary')
@@ -180,7 +180,7 @@ store = data(FLAGS.data_dir + FLAGS.data_type)
 
 
 d = td.Record((td.Map(td.Vector(vsize)),td.Map(td.Scalar())))
-f = d >> bidirectional_dynamic_FC(multi_FC_cell([500]*5), multi_FC_cell([500]*5),500) >> td.Void()
+f = d >> bidirectional_dynamic_FC(multi_FC_cell([1000]*5), multi_FC_cell([1000]*5),1000) >> td.Void()
 
 
 
@@ -227,12 +227,14 @@ sess.run(tf.global_variables_initializer())
     
 
 for i in tqdm.trange(FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size), unit="batches"):
-    _, batch_loss, summary = sess.run([train_op, loss, summary_op], compiler.build_feed_dict([next(store.data["train"]) for _ in range(FLAGS.batch_size)]))
+    _, batch_loss, summary = sess.run([train_op, loss, summary_op],
+                                      compiler.build_feed_dict([next(store.data["train"]) for _ in range(FLAGS.batch_size)]))
     assert not np.isnan(batch_loss)
+    
     if i % 5 == 0:
         writer.add_summary(summary, i)
     if i % 1000 == 0:
-        save_path = saver.save(sess, path, global_step=i)
+        save_path = saver.save(sess, path + "/model.ckpt", global_step=i)
     
 
     
