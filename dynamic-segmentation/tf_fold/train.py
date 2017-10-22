@@ -193,7 +193,7 @@ l1_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 l2_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 cross_entropy_tf = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels)
 cross_entropy =  tf.reduce_mean(labels * - tf.log(logits) + (1 - labels) * - tf.log(1 - logits))
-#TODO data label distribution analysis for determining the best loss
+
 
 loss = cross_entropy
 
@@ -217,13 +217,42 @@ opt = tf.train.RMSPropOptimizer(learning_rate=FLAGS.learning_rate)
 train_op = opt.minimize(loss)
 sess.run(tf.global_variables_initializer())
 
-#def inference_on_data(sess, data_gen, compiler, ):
+# validation summary:
+validation_loss_placeholder = tf.placeholder(tf.float32, name="validation_loss")
+validation_loss_summary = tf.summary.scalar('validation_loss', validation_loss_placeholder)
+test_loss_placeholder = tf.placeholder(tf.float32, name="test_loss")
+test_loss_summary = tf.summary.scalar('validation_loss', test_loss_placeholder)
+
+#TODO remove duplicate words
+#TODO switch to more stable loss implementation (tf cross entropy)
 #TODO automated validation and test
 #TODO Early stopping
 #TODO auto save
 #TODO word training
 #TODO command line usage
 #TODO metrics : word level accuracy, char level accuracy, recall F-score
+#TODO inference ipynotebook
+
+def get_metrics_on_dataset(dataset, train_step):
+    loss_sum = 0
+    accs = []
+    recalls = []
+    for i in tqdm.trange(int(store.size[dataset] / FLAGS.batch_size)):
+        batch_loss, accuracy, rec = sess.run([loss, acc, recall],
+                              compiler.build_feed_dict([next(store.data[dataset]) for _ in range(FLAGS.batch_size)]))
+        loss_sum += batch_loss
+        accs.append(accuracy)
+        recalls.append(rec)
+    
+    if dataset == "validation":
+        valid_summary = sess.run(validation_loss_summary,feed_dict={validation_loss_placeholder: loss_sum})
+        writer.add_summary(valid_summary, train_step + 1)
+    elif dataset == "test":
+        test_summary = session.run(test_loss_summary,feed_dict={test_loss_placeholder: loss_sum})
+        writer.add_summary(test_summary, train_step + 1)
+
+    return loss_sum, np.average(accs), np.average(recalls)
+    
     
 
 for i in tqdm.trange(FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size), unit="batches"):
@@ -233,8 +262,17 @@ for i in tqdm.trange(FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size),
     
     if i % 5 == 0:
         writer.add_summary(summary, i)
+        
+    if i % 500 == 0:
+        l, a, r = get_metrics_on_dataset("validation", i)
+        print("loss: ", l, " accuracy: ", a, "% recall: ", r)
+            
     if i % 1000 == 0:
         save_path = saver.save(sess, path + "/model.ckpt", global_step=i)
+        
+print("Testing...")
+l, a, r = get_metrics_on_dataset("test")
+print("loss: ", l, " accuracy: ", a, "% recall: ", r)
     
 
     
