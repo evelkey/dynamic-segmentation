@@ -1,4 +1,3 @@
-# coding: utf-8
 import numpy as np
 import time
 import data
@@ -12,15 +11,16 @@ from conv_lstm_cell import *
 
 
 FLAGS = tf.app.flags.FLAGS
-tf.app.flags.DEFINE_integer('batch_size', 8, """batchsize""")
-tf.app.flags.DEFINE_integer('epochs', 2, """epoch count""")
-tf.app.flags.DEFINE_string('data_dir', "/mnt/permanent/Home/nessie/velkey/data/", """data store basedir""")
-tf.app.flags.DEFINE_string('log_dir', "/mnt/permanent/Home/nessie/velkey/logs/", """logging directory root""")
-tf.app.flags.DEFINE_string('run_name', "development", """naming: loss_fn, batch size, 
-                                                         architecture, optimizer""")
-tf.app.flags.DEFINE_string('data_type', "sentence/", """can be sentence/, word/""")
-tf.app.flags.DEFINE_string('model', "lstm", """can be lstm, convlstm right now""")
-tf.app.flags.DEFINE_float('learning_rate', 0.001, """starting learning rate""")
+tf.app.flags.DEFINE_integer('batch_size',    8, """batchsize""")
+tf.app.flags.DEFINE_integer('epochs',        10, """epoch count""")
+tf.app.flags.DEFINE_string('data_dir',       "/mnt/permanent/Home/nessie/velkey/data/", """data store basedir""")
+tf.app.flags.DEFINE_string('log_dir',        "/mnt/permanent/Home/nessie/velkey/logs/", """logging directory root""")
+tf.app.flags.DEFINE_string('run_name',       "development", """naming: loss_fn, batch size, architecture, optimizer""")
+tf.app.flags.DEFINE_string('data_type',      "sentence/", """can be sentence/, word/""")
+tf.app.flags.DEFINE_string('model',          "lstm", """can be lstm, convlstm right now""")
+tf.app.flags.DEFINE_string('loss',           "crossentropy", """can be l1, l2, crossentropy""")
+tf.app.flags.DEFINE_string('optimizer',      "ADAM", """can be ADAM, RMS, SGD""")
+tf.app.flags.DEFINE_float('learning_rate',   0.001, """starting learning rate""")
 
 
 vocabulary = data.vocabulary(FLAGS.data_dir + 'vocabulary')
@@ -92,8 +92,7 @@ def convLSTM_cell(kernel_size, out_features = 64):
     return td.ScopedLayer(convlstm)
 
 def multi_convLSTM_cell(kernel_sizes, out_features):
-    stacked_convLSTM = tf.contrib.rnn.MultiRNNCell()
-    return td.ScopedLayer(stacked_convLSTM)
+    return td.ScopedLayer(tf.contrib.rnn.MultiRNNCell([convLSTM_cell(kernel, features) for (kernel, features) in zip(kernel_sizes, out_features)]))
 
 def FC_cell(units):
     return td.ScopedLayer(tf.contrib.rnn.LSTMCell(num_units=units))
@@ -104,7 +103,8 @@ def multi_FC_cell(units_list):
 def bidirectional_dynamic_CONV(fw_cell, bw_cell, out_features=64):
     bidir_conv_lstm = td.Composition()
     with bidir_conv_lstm.scope():        
-        fw_seq = td.Identity().reads(bidir_conv_lstm.input)
+        fw_seq = td.Identity().reads(bidir_conv_lstm.input[0])
+        labels = (td.GetItem(1)>>td.Map(td.Metric("labels"))>>td.Void()).reads(bidir_conv_lstm.input)
         bw_seq = td.Slice(step=-1).reads(fw_seq)
 
         forward_dir = (td.RNN(fw_cell) >> td.GetItem(0)).reads(fw_seq)
@@ -112,49 +112,16 @@ def bidirectional_dynamic_CONV(fw_cell, bw_cell, out_features=64):
         back_to_leftright = td.Slice(step=-1).reads(back_dir)
         
         output_transform = (td.Function(lambda x: tf.reshape(x, [-1,vsize*out_features])) >>
-                            #td.FC(10, activation=tf.nn.tanh) >>
                             td.FC(1, activation=None))
         
         bidir_common = (td.ZipWith(td.Concat() >> 
-                                  output_transform >> 
-                                  td.Metric('logits'))).reads(forward_dir, back_to_leftright)
+                                   output_transform >> 
+                                   td.Metric('logits'))).reads(forward_dir, back_to_leftright)
                     
         #tag_logits = td.Map(output_transform).reads(bidir_common)
 
         bidir_conv_lstm.output.reads(bidir_common)
     return bidir_conv_lstm
-
-def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
-    bidir_conv_lstm = td.Composition()
-    with bidir_conv_lstm.scope():        
-        fw_seq = td.Identity().reads(bidir_conv_lstm.input)
-        bw_seq = td.Slice(step=-1).reads(fw_seq)
-
-        forward_dir = (td.RNN(fw_cell) >> td.GetItem(0)).reads(fw_seq)
-        back_dir = (td.RNN(bw_cell) >> td.GetItem(0)).reads(bw_seq)
-        back_to_leftright = td.Slice(step=-1).reads(back_dir)
-        
-        output_transform = td.FC(1, activation=tf.nn.sigmoid)
-        
-        bidir_common = (td.ZipWith(td.Concat() >> 
-                                  output_transform >> 
-                                  td.Metric('logits'))).reads(forward_dir, back_to_leftright)
-
-        bidir_conv_lstm.output.reads(bidir_common)
-    return bidir_conv_lstm
-
-
-CONV_data = td.Map(td.Vector(vsize) >> td.Function(lambda x: tf.reshape(x, [-1,vsize,1])))
-CONV_model =  CONV_data >> bidirectional_dynamic_CONV(convLSTM_cell(vsize), convLSTM_cell(vsize)) >> td.Void()
-#labels = td.Map(td.Scalar() >> td.Metric("labels")) >> td.Void()
-
-FC_data = td.Map(td.Vector(vsize))#>> td.Function(lambda x: tf.reshape(x, [-1,vsize])))
-FC_model = FC_data >> bidirectional_dynamic_FC(multi_FC_cell([100]), multi_FC_cell([100]),100) >>td.Void()
-
-
-
-
-
 
 
 def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
@@ -176,15 +143,23 @@ def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
         bidir_conv_lstm.output.reads(bidir_common)
     return bidir_conv_lstm
 
+CONV_data = td.Record((td.Map(td.Vector(vsize) >> td.Function(lambda x: tf.reshape(x, [-1,vsize,1]))),td.Map(td.Scalar())))
+CONV_model =  CONV_data >> bidirectional_dynamic_CONV(convLSTM_cell(vsize), convLSTM_cell(vsize)) >> td.Void()
+
+
+FC_data = td.Record((td.Map(td.Vector(vsize)),td.Map(td.Scalar())))
+FC_model = FC_data >> bidirectional_dynamic_FC(multi_FC_cell([100]*8), multi_FC_cell([100]*8),100) >> td.Void()
+
 store = data(FLAGS.data_dir + FLAGS.data_type)
 
-
-d = td.Record((td.Map(td.Vector(vsize)),td.Map(td.Scalar())))
-f = d >> bidirectional_dynamic_FC(multi_FC_cell([1000]*5), multi_FC_cell([1000]*5),1000) >> td.Void()
-
-
-
-compiler = td.Compiler.create(f)
+if FLAGS.model == "lstm":
+    model = FC_model
+elif FLAGS.model == "convlstm":
+    model = CONV_model
+else:
+    raise NotImplemented
+    
+compiler = td.Compiler.create(model)
 logits = tf.squeeze(compiler.metric_tensors['logits'])
 labels = compiler.metric_tensors['labels']
 predictions = tf.nn.sigmoid(logits)
@@ -192,11 +167,15 @@ predictions = tf.nn.sigmoid(logits)
 l1_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 l2_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
 cross_entropy = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels))
-#deprecated:
-cross_entropy_unstable =  tf.reduce_mean(labels * - tf.log(predictions) + (1 - labels) * - tf.log(1 - predictions))
 
-
-loss = cross_entropy
+if FLAGS.loss == "l1":
+    loss = l1_loss
+elif FLAGS.loss == "l2":
+    loss = l2_loss
+elif FLAGS.loss == "crossentropy":
+    loss = cross_entropy
+else:
+    raise NotImplemented
 
 path = FLAGS.log_dir + FLAGS.run_name
 writer = tf.summary.FileWriter(path, graph=tf.get_default_graph())
@@ -214,7 +193,16 @@ recall = tf.cast(correct_trues,tf.float32) / all_trues
 tf.summary.scalar("recall", recall)
          
 summary_op = tf.summary.merge_all()
-opt = tf.train.RMSPropOptimizer(learning_rate=FLAGS.learning_rate)
+
+if FLAGS.optimizer == "ADAM":
+    opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+elif FLAGS.optimizer == "RMS":
+    opt = tf.train.RMSPropOptimizer(learning_rate=FLAGS.learning_rate)
+elif FLAGS.optimizer == "SGD":
+    opt = tf.train.GradientDescentOptimizer(learning_rate=FLAGS.learning_rate)
+else:
+    raise NotImplemented
+
 train_op = opt.minimize(loss)
 sess.run(tf.global_variables_initializer())
 
@@ -246,10 +234,16 @@ def get_metrics_on_dataset(dataset, train_step):
     return loss_sum, np.average(accs), np.average(recalls)
     
     
+def should_stop(log, patience=10):
+    for item in log:
+        pass
+    return false
 
+    
 for i in tqdm.trange(FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size), unit="batches"):
     _, batch_loss, summary = sess.run([train_op, loss, summary_op],
-                                      compiler.build_feed_dict([next(store.data["train"]) for _ in range(FLAGS.batch_size)]))
+                                      compiler.build_feed_dict([next(store.data["train"])
+                                                                for _ in range(FLAGS.batch_size)]))
     assert not np.isnan(batch_loss)
     
     if i % 5 == 0:
