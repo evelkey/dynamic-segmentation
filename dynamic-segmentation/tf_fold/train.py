@@ -66,7 +66,7 @@ class data():
         onehot[indices]=1
         return [onehot[i,:] for i in range(len(onehot))]
 
-def params_info():
+def model_information():
     total_parameters = 0
     for variable in tf.trainable_variables():
         # shape is an array of tf.Dimension
@@ -92,7 +92,9 @@ def convLSTM_cell(kernel_size, out_features = 64):
     return td.ScopedLayer(convlstm)
 
 def multi_convLSTM_cell(kernel_sizes, out_features):
-    return td.ScopedLayer(tf.contrib.rnn.MultiRNNCell([convLSTM_cell(kernel, features) for (kernel, features) in zip(kernel_sizes, out_features)]))
+    return td.ScopedLayer(tf.contrib.rnn.MultiRNNCell(
+        [convLSTM_cell(kernel, features)
+         for (kernel, features) in zip(kernel_sizes, out_features)]))
 
 def FC_cell(units):
     return td.ScopedLayer(tf.contrib.rnn.LSTMCell(num_units=units))
@@ -144,11 +146,14 @@ def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
     return bidir_conv_lstm
 
 CONV_data = td.Record((td.Map(td.Vector(vsize) >> td.Function(lambda x: tf.reshape(x, [-1,vsize,1]))),td.Map(td.Scalar())))
-CONV_model =  CONV_data >> bidirectional_dynamic_CONV(convLSTM_cell(vsize), convLSTM_cell(vsize)) >> td.Void()
-
+CONV_model =  (CONV_data >>
+               bidirectional_dynamic_CONV(convLSTM_cell(vsize), convLSTM_cell(vsize)) >>
+               td.Void())
 
 FC_data = td.Record((td.Map(td.Vector(vsize)),td.Map(td.Scalar())))
-FC_model = FC_data >> bidirectional_dynamic_FC(multi_FC_cell([100]*8), multi_FC_cell([100]*8),100) >> td.Void()
+FC_model = (FC_data >>
+            bidirectional_dynamic_FC(multi_FC_cell([100]*8), multi_FC_cell([100]*8),100) >>
+            td.Void())
 
 store = data(FLAGS.data_dir + FLAGS.data_type)
 
@@ -234,12 +239,25 @@ def get_metrics_on_dataset(dataset, train_step):
     return loss_sum, np.average(accs), np.average(recalls)
     
     
-def should_stop(log, patience=10):
-    for item in log:
-        pass
-    return false
-
+class stopper():
+    def __init__(self, patience=20):
+        self.log = []
+        self.patience = patience
+        self.should_stop = False
+        
+    def add(self, value)
+        self.log.append(value)
+        return self.check()
     
+    def check(self):
+        minimum = min(self.log)
+        errors = sum([1 if i>minimum else 0 for i in self.log[self.log.index(minimum):]])
+        if errors > self.patience:
+            self.should_stop = True
+        return self.should_stop
+    
+early = stopper(20)
+
 for i in tqdm.trange(FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size), unit="batches"):
     _, batch_loss, summary = sess.run([train_op, loss, summary_op],
                                       compiler.build_feed_dict([next(store.data["train"])
@@ -252,6 +270,8 @@ for i in tqdm.trange(FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size),
     if i % 500 == 0:
         l, a, r = get_metrics_on_dataset("validation", i)
         print("loss: ", l, " accuracy: ", a, "% recall: ", r)
+        if early.add(l):
+            break
             
     if i % 1000 == 0:
         save_path = saver.save(sess, path + "/model.ckpt", global_step=i)
@@ -264,7 +284,7 @@ print("loss: ", l, " accuracy: ", a, "% recall: ", r)
 #DONE remove duplicate words
 #DONE switch to more stable loss implementation (tf cross entropy)
 #DONE automated validation and test
-#TODO Early stopping
+#DONE Early stopping
 #DONE auto save
 #DONE word training
 #DONE command line usage
