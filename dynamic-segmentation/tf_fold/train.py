@@ -13,11 +13,16 @@ from conv_lstm_cell import *
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_integer('batch_size',    8, """batchsize""")
 tf.app.flags.DEFINE_integer('epochs',        10, """epoch count""")
+tf.app.flags.DEFINE_integer('truncate',      500, """truncate input sequences to this length""")
 tf.app.flags.DEFINE_string('data_dir',       "/mnt/permanent/Home/nessie/velkey/data/", """data store basedir""")
 tf.app.flags.DEFINE_string('log_dir',        "/mnt/permanent/Home/nessie/velkey/logs/", """logging directory root""")
 tf.app.flags.DEFINE_string('run_name',       "development", """naming: loss_fn, batch size, architecture, optimizer""")
 tf.app.flags.DEFINE_string('data_type',      "sentence/", """can be sentence/, word/""")
-tf.app.flags.DEFINE_string('model',          "lstm", """can be lstm, convlstm right now""")
+tf.app.flags.DEFINE_string('model',          "lstm", """can be lstm, convlstm""")
+tf.app.flags.DEFINE_integer('stack_cells',   2, """how many lstms to stack in each dimensions""")
+tf.app.flags.DEFINE_integer('cell_size',     1000, """only valid with lstm model, size of the LSTM cell""")
+tf.app.flags.DEFINE_integer('conv_kernel',   0, """convolutional kernel size for convlstm, if 0, vocab size is used""")
+tf.app.flags.DEFINE_integer('conv_channels', 64, """convolutional output channels for convlstm""")
 tf.app.flags.DEFINE_string('loss',           "crossentropy", """can be l1, l2, crossentropy""")
 tf.app.flags.DEFINE_string('optimizer',      "ADAM", """can be ADAM, RMS, SGD""")
 tf.app.flags.DEFINE_float('learning_rate',   0.001, """starting learning rate""")
@@ -32,7 +37,7 @@ char = lambda i: vocabulary[i]
 
 
 class data():
-    def __init__(self, folder, truncate=120):
+    def __init__(self, folder, truncate):
         self.data_dir = folder
         self.data = dict()
         self.size = dict()
@@ -46,7 +51,7 @@ class data():
                         
     def sentence_reader(self, file):
         """
-        read sentences from the data format setence: word\tword\n.....\t\n
+        read sentences from the data format setence: sentence\tlabels\n
         """
         data = [line[:-1].split('\t') for line in open(file)]
         while True:
@@ -66,6 +71,7 @@ class data():
         onehot[indices]=1
         return [onehot[i,:] for i in range(len(onehot))]
 
+    
 def model_information():
     total_parameters = 0
     for variable in tf.trainable_variables():
@@ -75,17 +81,11 @@ def model_information():
         # print(len(shape))
         variable_parametes = 1
         for dim in shape:
-            # print(dim)
             variable_parametes *= dim.value
         print("\tparams: ", variable_parametes)
         total_parameters += variable_parametes
     print(total_parameters)
     return total_parameters
-
-def onehot(string):
-    onehot = np.zeros([len(string),vsize])
-    onehot[np.arange(len(string)), np.array([index(char) for char in string])]=1
-    return [onehot[i,:] for i in range(len(onehot))]
 
 def convLSTM_cell(kernel_size, out_features = 64):
     convlstm = Conv1DLSTMCell(input_shape=[vsize,1], output_channels=out_features, kernel_shape=[kernel_size])
@@ -120,8 +120,6 @@ def bidirectional_dynamic_CONV(fw_cell, bw_cell, out_features=64):
                                    output_transform >> 
                                    td.Metric('logits'))).reads(forward_dir, back_to_leftright)
                     
-        #tag_logits = td.Map(output_transform).reads(bidir_common)
-
         bidir_conv_lstm.output.reads(bidir_common)
     return bidir_conv_lstm
 
@@ -152,10 +150,10 @@ CONV_model =  (CONV_data >>
 
 FC_data = td.Record((td.Map(td.Vector(vsize)),td.Map(td.Scalar())))
 FC_model = (FC_data >>
-            bidirectional_dynamic_FC(multi_FC_cell([100]*8), multi_FC_cell([100]*8),100) >>
+            bidirectional_dynamic_FC(multi_FC_cell([1000]*5), multi_FC_cell([1000]*5),1000) >>
             td.Void())
 
-store = data(FLAGS.data_dir + FLAGS.data_type)
+store = data(FLAGS.data_dir + FLAGS.data_type, FLAGS.truncate)
 
 if FLAGS.model == "lstm":
     model = FC_model
@@ -245,7 +243,7 @@ class stopper():
         self.patience = patience
         self.should_stop = False
         
-    def add(self, value)
+    def add(self, value):
         self.log.append(value)
         return self.check()
     
@@ -280,7 +278,7 @@ print("Testing...")
 l, a, r = get_metrics_on_dataset("test")
 print("loss: ", l, " accuracy: ", a, "% recall: ", r)
     
-
+#TODO add differently segmented words from same form
 #DONE remove duplicate words
 #DONE switch to more stable loss implementation (tf cross entropy)
 #DONE automated validation and test
@@ -288,5 +286,5 @@ print("loss: ", l, " accuracy: ", a, "% recall: ", r)
 #DONE auto save
 #DONE word training
 #DONE command line usage
-#TODO metrics : word level accuracy, char level accuracy DONE, recall F-score
+#TODO metrics : word level accuracy, char level accuracy DONE, recall DONE, F-score
 #TODO inference ipynotebook
