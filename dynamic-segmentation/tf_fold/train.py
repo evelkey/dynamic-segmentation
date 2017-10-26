@@ -145,7 +145,8 @@ def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
 
 CONV_data = td.Record((td.Map(td.Vector(vsize) >> td.Function(lambda x: tf.reshape(x, [-1,vsize,1]))),td.Map(td.Scalar())))
 CONV_model =  (CONV_data >>
-               bidirectional_dynamic_CONV(convLSTM_cell(vsize), convLSTM_cell(vsize)) >>
+               bidirectional_dynamic_CONV(multi_convLSTM_cell([vsize,vsize,vsize],[100,100,100]), 
+                                          multi_convLSTM_cell([vsize,vsize,vsize],[100,100,100])) >>
                td.Void())
 
 FC_data = td.Record((td.Map(td.Vector(vsize)),td.Map(td.Scalar())))
@@ -217,24 +218,27 @@ test_loss_summary = tf.summary.scalar('validation_loss', test_loss_placeholder)
 
 
 def get_metrics_on_dataset(dataset, train_step):
-    loss_sum = 0
+    losses = []
     accs = []
     recalls = []
-    for i in tqdm.trange(int(store.size[dataset] / FLAGS.batch_size)):
+    step = int(store.size[dataset] / FLAGS.batch_size)
+    for i in tqdm.trange(step):
         batch_loss, accuracy, rec = sess.run([loss, acc, recall],
                               compiler.build_feed_dict([next(store.data[dataset]) for _ in range(FLAGS.batch_size)]))
-        loss_sum += batch_loss
+        losses.append(batch_loss)
         accs.append(accuracy)
         recalls.append(rec)
     
+    avg_loss = np.average(losses)
+    
     if dataset == "validation":
-        valid_summary = sess.run(validation_loss_summary,feed_dict={validation_loss_placeholder: loss_sum})
-        writer.add_summary(valid_summary, train_step + 1)
+        valid_summary = sess.run(validation_loss_summary,feed_dict={validation_loss_placeholder: avg_loss})
+        writer.add_summary(valid_summary, train_step)
     elif dataset == "test":
-        test_summary = session.run(test_loss_summary,feed_dict={test_loss_placeholder: loss_sum})
-        writer.add_summary(test_summary, train_step + 1)
+        test_summary = session.run(test_loss_summary,feed_dict={test_loss_placeholder: avg_loss})
+        writer.add_summary(test_summary, train_step)
 
-    return loss_sum, np.average(accs), np.average(recalls)
+    return np.average(losses), np.average(accs), np.average(recalls)
     
     
 class stopper():
@@ -255,8 +259,9 @@ class stopper():
         return self.should_stop
     
 early = stopper(20)
+steps = FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size)
 
-for i in tqdm.trange(FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size), unit="batches"):
+for i in tqdm.trange(steps, unit="batches"):
     _, batch_loss, summary = sess.run([train_op, loss, summary_op],
                                       compiler.build_feed_dict([next(store.data["train"])
                                                                 for _ in range(FLAGS.batch_size)]))
@@ -275,10 +280,10 @@ for i in tqdm.trange(FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size),
         save_path = saver.save(sess, path + "/model.ckpt", global_step=i)
         
 print("Testing...")
-l, a, r = get_metrics_on_dataset("test")
+l, a, r = get_metrics_on_dataset("test", steps)
 print("loss: ", l, " accuracy: ", a, "% recall: ", r)
     
-#TODO add differently segmented words from same form
+#DONE add differently segmented words from same form
 #DONE remove duplicate words
 #DONE switch to more stable loss implementation (tf cross entropy)
 #DONE automated validation and test
