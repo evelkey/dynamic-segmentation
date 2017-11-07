@@ -13,8 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
-
-# !! MOVED from tensorflow master to be able to use convolutional LSTM cells
+# !! added compatibility to dynamic computational graphs
+# !! Modified and MOVED from tensorflow master to be able to use convolutional LSTM cells
 
 """Module for constructing RNN Cells."""
 import tensorflow as tf

@@ -13,16 +13,16 @@ from conv_lstm_cell import *
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_integer('batch_size',    8, """batchsize""")
 tf.app.flags.DEFINE_integer('epochs',        10, """epoch count""")
-tf.app.flags.DEFINE_integer('truncate',      500, """truncate input sequences to this length""")
+tf.app.flags.DEFINE_integer('truncate',      400, """truncate input sequences to this length""")
 tf.app.flags.DEFINE_string('data_dir',       "/mnt/permanent/Home/nessie/velkey/data/", """data store basedir""")
 tf.app.flags.DEFINE_string('log_dir',        "/mnt/permanent/Home/nessie/velkey/logs/", """logging directory root""")
 tf.app.flags.DEFINE_string('run_name',       "development", """naming: loss_fn, batch size, architecture, optimizer""")
 tf.app.flags.DEFINE_string('data_type',      "sentence/", """can be sentence/, word/""")
 tf.app.flags.DEFINE_string('model',          "lstm", """can be lstm, convlstm""")
-tf.app.flags.DEFINE_integer('stack_cells',   2, """how many lstms to stack in each dimensions""")
-tf.app.flags.DEFINE_integer('cell_size',     1000, """only valid with lstm model, size of the LSTM cell""")
-tf.app.flags.DEFINE_integer('conv_kernel',   0, """convolutional kernel size for convlstm, if 0, vocab size is used""")
-tf.app.flags.DEFINE_integer('conv_channels', 64, """convolutional output channels for convlstm""")
+#tf.app.flags.DEFINE_integer('stack_cells',   2, """how many lstms to stack in each dimensions""")
+#tf.app.flags.DEFINE_integer('cell_size',     1000, """only valid with lstm model, size of the LSTM cell""")
+#tf.app.flags.DEFINE_integer('conv_kernel',   0, """convolutional kernel size for convlstm, if 0, vocab size is used""")
+#tf.app.flags.DEFINE_integer('conv_channels', 64, """convolutional output channels for convlstm""")
 tf.app.flags.DEFINE_string('loss',           "crossentropy", """can be l1, l2, crossentropy""")
 tf.app.flags.DEFINE_string('optimizer',      "ADAM", """can be ADAM, RMS, SGD""")
 tf.app.flags.DEFINE_float('learning_rate',   0.001, """starting learning rate""")
@@ -168,8 +168,8 @@ logits = tf.squeeze(compiler.metric_tensors['logits'])
 labels = compiler.metric_tensors['labels']
 predictions = tf.nn.sigmoid(logits)
 
-l1_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
-l2_loss = tf.reduce_mean(tf.abs(tf.subtract(labels,logits)))
+l1_loss = tf.reduce_mean(tf.abs(tf.subtract(labels, predictions)))
+l2_loss = tf.reduce_mean(tf.square(tf.subtract(labels, predictions)))
 cross_entropy = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels))
 
 if FLAGS.loss == "l1":
@@ -186,15 +186,28 @@ writer = tf.summary.FileWriter(path, graph=tf.get_default_graph())
 saver = tf.train.Saver(max_to_keep=20)
 tf.summary.scalar("batch_loss", loss)
 
-#Accuracy
-acc = tf.reduce_sum(tf.cast(tf.equal(tf.less(0.5,predictions), tf.cast(labels, tf.bool)),tf.int32))*100/tf.size(labels)
-tf.summary.scalar("batch_accuracy", acc)
 
-# Recall
-correct_trues = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(tf.less(0.5, predictions), tf.cast(labels, tf.bool)), tf.cast(labels, tf.bool)), tf.int32))
-all_trues = tf.reduce_sum(labels)
-recall = tf.cast(correct_trues,tf.float32) / all_trues
+def metrics(probs, labels):
+    labels = tf.cast(labels, tf.int32)
+    predicted = tf.cast(tf.less(0.5, probs),tf.int32)
+    
+    TP = tf.count_nonzero(predicted * labels)
+    TN = tf.count_nonzero((predicted - 1) * (labels - 1))
+    FP = tf.count_nonzero(predicted * (labels - 1))
+    FN = tf.count_nonzero((predicted - 1) * labels)
+    precision = TP / (TP + FP)
+    recall = TP / (TP + FN)
+    f1 = 2 * precision * recall / (precision + recall)
+                          
+    accuracy = tf.count_nonzero(tf.equal(predicted, labels))
+         
+    return precision, recall, accuracy, f1
+    
+precision, recall, accuracy, f1 = metrics(predictions, labels)
+tf.summary.scalar("accuracy", accuracy)
+tf.summary.scalar("precision", precision)
 tf.summary.scalar("recall", recall)
+tf.summary.scalar("f1", f1)
          
 summary_op = tf.summary.merge_all()
 
@@ -213,32 +226,52 @@ sess.run(tf.global_variables_initializer())
 # validation summary:
 validation_loss_placeholder = tf.placeholder(tf.float32, name="validation")
 validation_loss_summary = tf.summary.scalar('validation_loss', validation_loss_placeholder)
+validation_accuracy_placeholder = tf.placeholder(tf.float32, name="validation_accuracy")
+validation_accuracy_summary = tf.summary.scalar('validation_accuracy', validation_accuracy_placeholder)
+validation_f1_placeholder = tf.placeholder(tf.float32, name="validation_f1")
+validation_f1_summary = tf.summary.scalar('validation_f1', validation_f1_placeholder)
 test_loss_placeholder = tf.placeholder(tf.float32, name="test")
 test_loss_summary = tf.summary.scalar('validation_loss', test_loss_placeholder)
+test_f1_placeholder = tf.placeholder(tf.float32, name="test_f1")
+test_f1_summary = tf.summary.scalar('test_f1', test_f1_placeholder)
+test_accuracy_placeholder = tf.placeholder(tf.float32, name="test_accuracy")
+test_accuracy_summary = tf.summary.scalar('test_accuracy', test_accuracy_placeholder)
 
 
 def get_metrics_on_dataset(dataset, train_step):
     losses = []
     accs = []
     recalls = []
+    f1s = []
     step = int(store.size[dataset] / FLAGS.batch_size)
     for i in tqdm.trange(step):
-        batch_loss, accuracy, rec = sess.run([loss, acc, recall],
+        batch_loss, acc, rec, f = sess.run([loss, accuracy, recall, f1],
                               compiler.build_feed_dict([next(store.data[dataset]) for _ in range(FLAGS.batch_size)]))
         losses.append(batch_loss)
-        accs.append(accuracy)
+        accs.append(acc)
         recalls.append(rec)
+        f1s.append(f1)
     
-    avg_loss = np.average(losses)
+    l, a, r, f = np.average(losses), np.average(accs), np.average(recalls), np.average(f1s)
     
     if dataset == "validation":
-        valid_summary = sess.run(validation_loss_summary,feed_dict={validation_loss_placeholder: avg_loss})
-        writer.add_summary(valid_summary, train_step)
+        feed = {validation_loss_placeholder: l,
+                validation_accuracy_placeholder: a,
+                validation_f1_placeholder: f}
+        vl, va, vf = sess.run([validation_loss_summary, validation_accuracy_summary, validation_f1_summary],feed_dict=feed)
+        writer.add_summary(vl, train_step)
+        writer.add_summary(va, train_step)
+        writer.add_summary(vf, train_step)
     elif dataset == "test":
-        test_summary = session.run(test_loss_summary,feed_dict={test_loss_placeholder: avg_loss})
-        writer.add_summary(test_summary, train_step)
+        feed = {test_loss_placeholder: l,
+                test_accuracy_placeholder: a,
+                test_f1_placeholder: f}
+        vl, va, vf = sess.run([test_loss_summary, test_accuracy_summary, test_f1_summary],feed_dict=feed)
+        writer.add_summary(vl, train_step)
+        writer.add_summary(va, train_step)
+        writer.add_summary(vf, train_step)
 
-    return np.average(losses), np.average(accs), np.average(recalls)
+    return l,a,r,f
     
     
 class stopper():
@@ -249,6 +282,8 @@ class stopper():
         
     def add(self, value):
         self.log.append(value)
+        if self.log[-1] > self.log[-2]:
+            print("Development loss increased!!")
         return self.check()
     
     def check(self):
@@ -267,10 +302,10 @@ for i in tqdm.trange(steps, unit="batches"):
                                                                 for _ in range(FLAGS.batch_size)]))
     assert not np.isnan(batch_loss)
     
-    if i % 5 == 0:
+    if i % 10 == 0:
         writer.add_summary(summary, i)
         
-    if i % 500 == 0:
+    if i % 1000 == 999:
         l, a, r = get_metrics_on_dataset("validation", i)
         print("loss: ", l, " accuracy: ", a, "% recall: ", r)
         if early.add(l):
@@ -282,14 +317,8 @@ for i in tqdm.trange(steps, unit="batches"):
 print("Testing...")
 l, a, r = get_metrics_on_dataset("test", steps)
 print("loss: ", l, " accuracy: ", a, "% recall: ", r)
-    
-#DONE add differently segmented words from same form
-#DONE remove duplicate words
-#DONE switch to more stable loss implementation (tf cross entropy)
-#DONE automated validation and test
-#DONE Early stopping
-#DONE auto save
-#DONE word training
-#DONE command line usage
-#TODO metrics : word level accuracy, char level accuracy DONE, recall DONE, F-score
+
+#TODO get CONVLSTM working
+#TODO Padding analysis
+#TODO benchmark runtime on word and sentence level depending on the padding
 #TODO inference ipynotebook
