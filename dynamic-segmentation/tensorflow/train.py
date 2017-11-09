@@ -231,7 +231,7 @@ validation_accuracy_summary = tf.summary.scalar('validation_accuracy', validatio
 validation_f1_placeholder = tf.placeholder(tf.float32, name="validation_f1")
 validation_f1_summary = tf.summary.scalar('validation_f1', validation_f1_placeholder)
 test_loss_placeholder = tf.placeholder(tf.float32, name="test")
-test_loss_summary = tf.summary.scalar('validation_loss', test_loss_placeholder)
+test_loss_summary = tf.summary.scalar('test_loss', test_loss_placeholder)
 test_f1_placeholder = tf.placeholder(tf.float32, name="test_f1")
 test_f1_summary = tf.summary.scalar('test_f1', test_f1_placeholder)
 test_accuracy_placeholder = tf.placeholder(tf.float32, name="test_accuracy")
@@ -319,6 +319,4 @@ l, a, r = get_metrics_on_dataset("test", steps)
 print("loss: ", l, " accuracy: ", a, "% recall: ", r)
 
 #TODO get CONVLSTM working
-#TODO Padding analysis
-#TODO benchmark runtime on word and sentence level depending on the padding
 #TODO inference ipynotebook
