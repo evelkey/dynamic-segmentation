@@ -7,25 +7,22 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 sess = tf.InteractiveSession(config=config)
 import tensorflow_fold as td
-from conv_lstm_cell import *
+from conv_lstm_cell import Conv1DLSTMCell
 
 
 FLAGS = tf.app.flags.FLAGS
-tf.app.flags.DEFINE_integer('batch_size',    8, """batchsize""")
+tf.app.flags.DEFINE_integer('batch_size',    256, """batchsize""")
 tf.app.flags.DEFINE_integer('epochs',        10, """epoch count""")
-tf.app.flags.DEFINE_integer('truncate',      300, """truncate input sequences to this length""")
+tf.app.flags.DEFINE_integer('truncate',      200, """truncate input sequences to this length""")
 tf.app.flags.DEFINE_string('data_dir',       "/mnt/permanent/Home/nessie/velkey/data/", """data store basedir""")
 tf.app.flags.DEFINE_string('log_dir',        "/mnt/permanent/Home/nessie/velkey/logs/", """logging directory root""")
-tf.app.flags.DEFINE_string('run_name',       "development", """naming: loss_fn, batch size, architecture, optimizer""")
+tf.app.flags.DEFINE_string('run_name',       "ce_b256_3x100_static_trun200_ADAM_lr005", """naming: loss_fn, batch size, architecture, optimizer""")
 tf.app.flags.DEFINE_string('data_type',      "sentence/", """can be sentence/, word/""")
 tf.app.flags.DEFINE_string('model',          "lstm", """can be lstm, convlstm""")
-#tf.app.flags.DEFINE_integer('stack_cells',   2, """how many lstms to stack in each dimensions""")
-#tf.app.flags.DEFINE_integer('cell_size',     1000, """only valid with lstm model, size of the LSTM cell""")
-#tf.app.flags.DEFINE_integer('conv_kernel',   0, """convolutional kernel size for convlstm, if 0, vocab size is used""")
-#tf.app.flags.DEFINE_integer('conv_channels', 64, """convolutional output channels for convlstm""")
+
 tf.app.flags.DEFINE_string('loss',           "crossentropy", """can be l1, l2, crossentropy""")
 tf.app.flags.DEFINE_string('optimizer',      "ADAM", """can be ADAM, RMS, SGD""")
-tf.app.flags.DEFINE_float('learning_rate',   0.001, """starting learning rate""")
+tf.app.flags.DEFINE_float('learning_rate',   0.005, """starting learning rate""")
 
 
 vocabulary = data.vocabulary(FLAGS.data_dir + 'vocabulary')
@@ -87,90 +84,69 @@ def model_information():
     print(total_parameters)
     return total_parameters
 
-def convLSTM_cell(kernel_size, out_features = 64):
-    convlstm = Conv1DLSTMCell(input_shape=[vsize,1], output_channels=out_features, kernel_shape=[kernel_size])
-    return td.ScopedLayer(convlstm)
-
-def multi_convLSTM_cell(kernel_sizes, out_features):
-    return td.ScopedLayer(tf.contrib.rnn.MultiRNNCell(
-        [convLSTM_cell(kernel, features)
-         for (kernel, features) in zip(kernel_sizes, out_features)]))
-
-def FC_cell(units):
-    return td.ScopedLayer(tf.contrib.rnn.LSTMCell(num_units=units))
-
-def multi_FC_cell(units_list):
-    return td.ScopedLayer(tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.LSTMCell(num_units=units) for units in units_list]))
-    
-def bidirectional_dynamic_CONV(fw_cell, bw_cell, out_features=64):
-    bidir_conv_lstm = td.Composition()
-    with bidir_conv_lstm.scope():        
-        fw_seq = td.Identity().reads(bidir_conv_lstm.input[0])
-        labels = (td.GetItem(1)>>td.Map(td.Metric("labels"))>>td.Void()).reads(bidir_conv_lstm.input)
-        bw_seq = td.Slice(step=-1).reads(fw_seq)
-
-        forward_dir = (td.RNN(fw_cell) >> td.GetItem(0)).reads(fw_seq)
-        back_dir = (td.RNN(bw_cell) >> td.GetItem(0)).reads(bw_seq)
-        back_to_leftright = td.Slice(step=-1).reads(back_dir)
-        
-        output_transform = (td.Function(lambda x: tf.reshape(x, [-1,vsize*out_features])) >>
-                            td.FC(1, activation=None))
-        
-        bidir_common = (td.ZipWith(td.Concat() >> 
-                                   output_transform >> 
-                                   td.Metric('logits'))).reads(forward_dir, back_to_leftright)
-                    
-        bidir_conv_lstm.output.reads(bidir_common)
-    return bidir_conv_lstm
-
-
-def bidirectional_dynamic_FC(fw_cell, bw_cell, hidden):
-    bidir_conv_lstm = td.Composition()
-    with bidir_conv_lstm.scope():        
-        fw_seq = td.Identity().reads(bidir_conv_lstm.input[0])
-        labels = (td.GetItem(1)>>td.Map(td.Metric("labels"))>>td.Void()).reads(bidir_conv_lstm.input)
-        bw_seq = td.Slice(step=-1).reads(fw_seq)
-
-        forward_dir = (td.RNN(fw_cell) >> td.GetItem(0)).reads(fw_seq)
-        back_dir = (td.RNN(bw_cell) >> td.GetItem(0)).reads(bw_seq)
-        back_to_leftright = td.Slice(step=-1).reads(back_dir)
-        
-        output_transform = td.FC(1, activation=None)
-        
-        bidir_common = (td.ZipWith(td.Concat() >> 
-                                  output_transform >> td.Metric('logits'))).reads(forward_dir, back_to_leftright)
-        
-        bidir_conv_lstm.output.reads(bidir_common)
-    return bidir_conv_lstm
-
-CONV_data = td.Record((td.Map(td.Vector(vsize) >> td.Function(lambda x: tf.reshape(x, [-1,vsize,1]))),td.Map(td.Scalar())))
-CONV_model =  (CONV_data >>
-               bidirectional_dynamic_CONV(multi_convLSTM_cell([vsize,vsize,vsize],[100,100,100]), 
-                                          multi_convLSTM_cell([vsize,vsize,vsize],[100,100,100])) >>
-               td.Void())
-
-FC_data = td.Record((td.Map(td.Vector(vsize)),td.Map(td.Scalar())))
-FC_model = (FC_data >>
-            bidirectional_dynamic_FC(multi_FC_cell([1000]*5), multi_FC_cell([1000]*5),1000) >>
-            td.Void())
 
 store = data(FLAGS.data_dir + FLAGS.data_type, FLAGS.truncate)
+def pad(record):
+    pads = ((FLAGS.truncate-len(record[1]), 0), (0, 0))
+    ins = np.pad(record[0], pad_width=pads, mode="constant", constant_values=0)
+    outs = np.pad(record[1], pad_width=(FLAGS.truncate-len(record[1]), 0), mode="constant", constant_values=0)
+    return (ins, outs)
+
+def get_padded_batch(dataset="train"):
+    data = np.zeros([FLAGS.batch_size, FLAGS.truncate, vsize])
+    labels = np.zeros([FLAGS.batch_size, FLAGS.truncate, 1])
+    for i in range(FLAGS.batch_size):
+        sentence, label = pad(next(store.data[dataset]))
+        data[i] = sentence
+        labels[i, :, 0] = label
+    return data, labels
+
+
+x = tf.placeholder(tf.float32, shape=(FLAGS.batch_size, FLAGS.truncate, vsize))
+y = tf.placeholder(tf.int32, shape=(FLAGS.batch_size, FLAGS.truncate, 1))
+labels = y
+
+#lstm = Conv1DLSTMCell(input_shape=[vsize,1], output_channels=units, kernel_shape=[kernel_size])
 
 if FLAGS.model == "lstm":
-    model = FC_model
-elif FLAGS.model == "convlstm":
-    model = CONV_model
-else:
-    raise NotImplemented
+    num_units = [100, 100, 100]
     
-compiler = td.Compiler.create(model)
-logits = tf.squeeze(compiler.metric_tensors['logits'])
-labels = compiler.metric_tensors['labels']
+    with tf.variable_scope("fw"):
+        fw_cells = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.BasicLSTMCell(num_units=units) for units in num_units])
+    with tf.variable_scope("bw"):
+        bw_cells = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.BasicLSTMCell(num_units=units) for units in num_units])
+    outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw=fw_cells, cell_bw=bw_cells, inputs=x, dtype=tf.float32)
+    
+    RNN_out = tf.concat(outputs, -1)
+    filters = tf.get_variable(shape=[1,200,1], dtype=tf.float32, name="filters")
+    bias = tf.get_variable(shape=[1], dtype=tf.float32, name="bias")
+
+    logits = tf.nn.conv1d(RNN_out,filters=filters,stride=1,padding='SAME') + bias
+    
+elif FLAGS.model == "convlstm":
+    kernel_size = 20
+    num_units = [100, 100, 100]
+    
+    with tf.variable_scope("fw"):
+        fw_cells = tf.contrib.rnn.MultiRNNCell([Conv1DLSTMCell(input_shape=[vsize,1], output_channels=units, kernel_shape=[kernel_size]) for units in num_units])
+    with tf.variable_scope("bw"):
+        bw_cells = tf.contrib.rnn.MultiRNNCell([Conv1DLSTMCell(input_shape=[vsize,1], output_channels=units, kernel_shape=[kernel_size]) for units in num_units])
+    
+    outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw=fw_cells, cell_bw=bw_cells, inputs=x, dtype=tf.float32)
+    outputs = tf.reshape(outputs,-1)
+
+
+          
 predictions = tf.nn.sigmoid(logits)
 
-l1_loss = tf.reduce_mean(tf.abs(tf.subtract(labels, predictions)))
-l2_loss = tf.reduce_mean(tf.square(tf.subtract(labels, predictions)))
-cross_entropy = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels))
+
+valid_chars_in_batch = tf.reduce_sum(x)
+all_chars_in_batch = tf.size(x) / vsize
+valid_ratio = valid_chars_in_batch / tf.cast(all_chars_in_batch, tf.float32)
+
+l1_loss = tf.reduce_mean(tf.abs(tf.subtract(logits, tf.cast(labels, tf.float32))))
+l2_loss = tf.reduce_mean(tf.square(tf.subtract(logits, tf.cast(labels, tf.float32))))
+cross_entropy = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=tf.cast(labels, tf.float32)))
 
 if FLAGS.loss == "l1":
     loss = l1_loss
@@ -186,10 +162,13 @@ writer = tf.summary.FileWriter(path, graph=tf.get_default_graph())
 saver = tf.train.Saver(max_to_keep=20)
 tf.summary.scalar("batch_loss", loss)
 
-
-def metrics(probs, labels):
+def metrics(probs, labels, x):
     labels = tf.cast(labels, tf.int32)
     predicted = tf.cast(tf.less(0.5, probs),tf.int32)
+    length = tf.reduce_sum(x)
+    
+    #crop the sequences:
+    labels = labels
     
     TP = tf.count_nonzero(predicted * labels)
     TN = tf.count_nonzero((predicted - 1) * (labels - 1))
@@ -199,11 +178,11 @@ def metrics(probs, labels):
     recall = TP / (TP + FN)
     f1 = 2 * precision * recall / (precision + recall)
                           
-    accuracy = tf.count_nonzero(tf.equal(predicted, labels))
+    accuracy = tf.cast(tf.count_nonzero(tf.equal(predicted, labels)), tf.float32) / tf.cast(tf.size(labels), tf.float32) * 100
          
     return precision, recall, accuracy, f1
     
-precision, recall, accuracy, f1 = metrics(predictions, labels)
+precision, recall, accuracy, f1 = metrics(predictions, labels,x)
 tf.summary.scalar("accuracy", accuracy)
 tf.summary.scalar("precision", precision)
 tf.summary.scalar("recall", recall)
@@ -221,9 +200,8 @@ else:
     raise NotImplemented
 
 train_op = opt.minimize(loss)
-sess.run(tf.global_variables_initializer())
+tf.global_variables_initializer()
 
-# validation summary:
 validation_loss_placeholder = tf.placeholder(tf.float32, name="validation")
 validation_loss_summary = tf.summary.scalar('validation_loss', validation_loss_placeholder)
 validation_accuracy_placeholder = tf.placeholder(tf.float32, name="validation_accuracy")
@@ -237,7 +215,6 @@ test_f1_summary = tf.summary.scalar('test_f1', test_f1_placeholder)
 test_accuracy_placeholder = tf.placeholder(tf.float32, name="test_accuracy")
 test_accuracy_summary = tf.summary.scalar('test_accuracy', test_accuracy_placeholder)
 
-
 def get_metrics_on_dataset(dataset, train_step):
     losses = []
     accs = []
@@ -245,18 +222,21 @@ def get_metrics_on_dataset(dataset, train_step):
     f1s = []
     step = int(store.size[dataset] / FLAGS.batch_size)
     for i in tqdm.trange(step):
-        batch_loss, acc, rec, f = sess.run([loss, accuracy, recall, f1],
-                              compiler.build_feed_dict([next(store.data[dataset]) for _ in range(FLAGS.batch_size)]))
+        x_, y_ = get_padded_batch(dataset)
+        feed = {
+            x: x_,
+            y: y_}
+        batch_loss, acc, rec, f = sess.run([loss, accuracy, recall, f1],feed_dict=feed)
         losses.append(batch_loss)
         accs.append(acc)
         recalls.append(rec)
-        f1s.append(f1)
+        f1s.append(f)
     
     l, a, r, f = np.average(losses), np.average(accs), np.average(recalls), np.average(f1s)
     
     if dataset == "validation":
         feed = {validation_loss_placeholder: l,
-                validation_accuracy_placeholder: a,
+                validation_accuracy_placeholder: float(a),
                 validation_f1_placeholder: f}
         vl, va, vf = sess.run([validation_loss_summary, validation_accuracy_summary, validation_f1_summary],feed_dict=feed)
         writer.add_summary(vl, train_step)
@@ -264,12 +244,13 @@ def get_metrics_on_dataset(dataset, train_step):
         writer.add_summary(vf, train_step)
     elif dataset == "test":
         feed = {test_loss_placeholder: l,
-                test_accuracy_placeholder: a,
+                test_accuracy_placeholder: float(a),
                 test_f1_placeholder: f}
         vl, va, vf = sess.run([test_loss_summary, test_accuracy_summary, test_f1_summary],feed_dict=feed)
         writer.add_summary(vl, train_step)
         writer.add_summary(va, train_step)
         writer.add_summary(vf, train_step)
+        writer.flush()
 
     return l,a,r,f
     
@@ -282,8 +263,6 @@ class stopper():
         
     def add(self, value):
         self.log.append(value)
-        if self.log[-1] > self.log[-2]:
-            print("Development loss increased!!")
         return self.check()
     
     def check(self):
@@ -296,27 +275,28 @@ class stopper():
 early = stopper(20)
 steps = FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size)
 
+# run training
+
+sess.run(tf.global_variables_initializer())
 for i in tqdm.trange(steps, unit="batches"):
-    _, batch_loss, summary = sess.run([train_op, loss, summary_op],
-                                      compiler.build_feed_dict([next(store.data["train"])
-                                                                for _ in range(FLAGS.batch_size)]))
+    b_data, b_label = get_padded_batch("train")
+    _, batch_loss, summary= sess.run([train_op, loss, summary_op], {x: b_data.astype(float), y: b_label})
     assert not np.isnan(batch_loss)
     
-    if i % 10 == 0:
+    if i % 20 == 0:
         writer.add_summary(summary, i)
         
-    if i % 1000 == 999:
-        l, a, r = get_metrics_on_dataset("validation", i)
-        print("loss: ", l, " accuracy: ", a, "% recall: ", r)
+    if i % int(steps / FLAGS.epochs / 2) == 0:
+        l, a, r, f = get_metrics_on_dataset("validation", i)
+        print("loss: ", l, " accuracy: ", a, "% recall: ", r, "fscore: ", f)
         if early.add(l):
             break
             
-    if i % 1000 == 0:
+    if i % int(steps / FLAGS.epochs / 2) == 0:
         save_path = saver.save(sess, path + "/model.ckpt", global_step=i)
         
 print("Testing...")
-l, a, r = get_metrics_on_dataset("test", steps)
-print("loss: ", l, " accuracy: ", a, "% recall: ", r)
+l, a, r, f = get_metrics_on_dataset("test", steps)
+print("loss: ", l, " accuracy: ", a, "% recall: ", r, "fscore", f)
 
-#TODO get CONVLSTM working
-#TODO inference ipynotebook
+writer.flush()

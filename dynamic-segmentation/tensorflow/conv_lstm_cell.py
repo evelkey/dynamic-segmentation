@@ -196,7 +196,7 @@ def _conv(args,
     outshape = [inshape[0], inshape[1], tf.shape(kernel)[-1]]
 
     res = tf.cond(tf.equal(depth_batch_size, 0),
-                  lambda: tf.zeros(outshape), #conv_op(input_tensor, kernel, strides, padding='SAME'),
+                  lambda: tf.zeros(outshape),
                   lambda: conv_op(input_tensor, kernel, strides, padding='SAME'))
   if not bias:
     return res
