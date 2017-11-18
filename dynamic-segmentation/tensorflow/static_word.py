@@ -106,7 +106,11 @@ x = tf.placeholder(tf.float32, shape=(FLAGS.batch_size, FLAGS.truncate, vsize))
 y = tf.placeholder(tf.int32, shape=(FLAGS.batch_size, FLAGS.truncate, 1))
 labels = y
 
-#lstm = Conv1DLSTMCell(input_shape=[vsize,1], output_channels=units, kernel_shape=[kernel_size])
+def convolutional_output(input_tensor, outputs, filter_sizes):
+    temp = input_tensor
+    for out, filt in list(zip(outputs, filter_sizes))[:-1]:
+        temp = tf.layers.conv1d(temp, out, filt, activation=tf.nn.sigmoid, padding='same')
+    return tf.layers.conv1d(temp, outputs[-1], filter_sizes[-1], activation=None, padding='same')
 
 if FLAGS.model == "lstm":
     num_units = [100, 100, 100]
@@ -119,11 +123,7 @@ if FLAGS.model == "lstm":
     
     RNN_out = tf.concat(outputs, -1)
     
-    layer_0 = tf.layers.conv1d(RNN_out, 20, 3, activation=tf.nn.sigmoid, padding='same')
-    layer_1 = tf.layers.conv1d(layer_0, 1, 3, activation=tf.nn.sigmoid, padding='same')
-    #layer_2 = tf.layers.conv1d(layer_1, 1, 1, activation=tf.nn.sigmoid, padding='same')
-    logits = layer_1
-    #logits = tf.nn.conv1d(RNN_out,filters=filters,stride=1,padding='SAME') + bias
+    logits = convolutional_output(input_tensor=RNN_out, outputs=[100,20,1], filter_sizes=[5,3,1])
     
 elif FLAGS.model == "convlstm":
     kernel_size = 20
