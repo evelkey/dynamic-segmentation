@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-FLAGS = tf.app.FLAGS
+FLAGS = tf.app.flags.FLAGS
 
 
 def metrics(probs, labels, x):
@@ -26,7 +26,7 @@ def metrics(probs, labels, x):
     return precision, recall, accuracy, f1, predicted
 
 
-def loss():
+def loss(logits, labels):
     if FLAGS.loss == "l1":
         l1_loss = tf.reduce_mean(tf.abs(tf.subtract(logits, tf.cast(labels, tf.float32))))
         return l1_loss

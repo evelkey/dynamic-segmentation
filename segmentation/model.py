@@ -39,7 +39,7 @@ def stacked_fc_bi_lstm(x, num_units):
 def stacked_fully_conv_bi_lstm(x, kernel_size, num_units, vsize):
     inputs = tf.expand_dims(x, -1)
 
-    def convLSTM_cell(kernel_size, out_features, in_features=1, vsize):
+    def convLSTM_cell(kernel_size, out_features, in_features, vsize):
         convlstm = Conv1DLSTMCell(input_shape=[vsize, in_features], output_channels=out_features,
                                   kernel_shape=[kernel_size])
         return convlstm

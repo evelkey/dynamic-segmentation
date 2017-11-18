@@ -31,11 +31,11 @@ y = tf.placeholder(tf.int32, shape=(FLAGS.batch_size, FLAGS.truncate, 1))
 labels = y
 
 if FLAGS.model == "lstm":
-    logits = model.stacked_fc_bi_lstm(x, [128, 128, 128])
-    
+    rnn = model.stacked_fc_bi_lstm(x, [128, 128, 128])
 elif FLAGS.model == "convlstm":
-    logits = model.stacked_fully_conv_bi_lstm(x, 20, [128, 128, 128],store.vsize)
-          
+    rnn = model.stacked_fully_conv_bi_lstm(x, 20, [128, 128, 128],store.vsize)
+    
+logits = model.convolutional_output(rnn, [100,20,1], [5,5,3])
 predictions = tf.nn.sigmoid(logits)
 
 
@@ -44,7 +44,7 @@ all_chars_in_batch = tf.size(x) / store.vsize
 valid_ratio = valid_chars_in_batch / tf.cast(all_chars_in_batch, tf.float32)
 
 
-loss = tools.loss()
+loss = tools.loss(logits, labels)
 
 
 path = FLAGS.log_dir + FLAGS.run_name
