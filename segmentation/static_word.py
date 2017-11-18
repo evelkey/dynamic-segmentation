@@ -26,8 +26,8 @@ tf.app.flags.DEFINE_float('learning_rate',   0.005, """starting learning rate"""
 
 store = Data(FLAGS.data_dir + "word/", FLAGS.truncate)
 
-x = tf.placeholder(tf.float32, shape=(FLAGS.batch_size, FLAGS.truncate, store.vsize))
-y = tf.placeholder(tf.int32, shape=(FLAGS.batch_size, FLAGS.truncate, 1))
+x = tf.placeholder(tf.float32, shape=(None, FLAGS.truncate, store.vsize), name="input_x")
+y = tf.placeholder(tf.int32, shape=(None, FLAGS.truncate, 1), name="input_y")
 labels = y
 
 if FLAGS.model == "lstm":
@@ -36,16 +36,14 @@ elif FLAGS.model == "convlstm":
     rnn = model.stacked_fully_conv_bi_lstm(x, 20, [128, 128, 128],store.vsize)
     
 logits = model.convolutional_output(rnn, [100,20,1], [5,5,3])
-predictions = tf.nn.sigmoid(logits)
+predictions = tf.nn.sigmoid(logits, name='output_probs')
 
 
 valid_chars_in_batch = tf.reduce_sum(x)
 all_chars_in_batch = tf.size(x) / store.vsize
 valid_ratio = valid_chars_in_batch / tf.cast(all_chars_in_batch, tf.float32)
 
-
 loss = tools.loss(logits, labels)
-
 
 path = FLAGS.log_dir + FLAGS.run_name
 writer = tf.summary.FileWriter(path, graph=tf.get_default_graph())
@@ -98,9 +96,9 @@ def get_metrics_on_dataset(dataset, train_step):
         feed = {
             x: x_,
             y: y_}
-        batch_loss, acc, rec, f, preds = sess.run([loss, accuracy, recall, f1, predicted], feed_dict=feed)
+        batch_loss, rec, f, preds = sess.run([loss, recall, f1, predicted], feed_dict=feed)
         losses.append(batch_loss)
-        accs.append(acc)
+        accs.append(tools.char_accuracy_on_padded(x_, y_, preds, store.vsize))
         recalls.append(rec)
         f1s.append(f)
         good_words += sum([np.all(y_[i, :] == preds[i, :]) for i in range(FLAGS.batch_size)])

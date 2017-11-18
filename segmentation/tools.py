@@ -6,7 +6,7 @@ FLAGS = tf.app.flags.FLAGS
 
 def metrics(probs, labels, x):
     labels = tf.cast(labels, tf.int32)
-    predicted = tf.cast(tf.less(0.5, probs), tf.int32)
+    predicted = tf.cast(tf.less(0.5, probs), tf.int32, name="output")
     length = tf.reduce_sum(x)
 
     # crop the sequences:
@@ -40,6 +40,16 @@ def loss(logits, labels):
     else:
         raise NotImplemented
 
+        
+def char_accuracy_on_padded(x, label, prediction, vsize):
+    acc = 0
+    all_chars = np.sum(x)
+    for i in range(FLAGS.batch_size):
+        length = np.sum(x[i], dtype=int)
+        l_ = label[i][-length:]
+        p_ = prediction[i][-length:]
+        acc += np.sum(l_ == p_)
+    return acc / all_chars * 100
 
 class Stopper:
     def __init__(self, patience=20):
@@ -57,3 +67,12 @@ class Stopper:
         if errors > self.patience:
             self.should_stop = True
         return self.should_stop
+    
+    
+    
+def getmeta(path):
+    import os
+    for fname in os.listdir(path):
+        if ".meta" in fname:
+            return fname
+  
