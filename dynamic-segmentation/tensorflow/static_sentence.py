@@ -12,11 +12,11 @@ from conv_lstm_cell import Conv1DLSTMCell
 
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_integer('batch_size',    256, """batchsize""")
-tf.app.flags.DEFINE_integer('epochs',        10, """epoch count""")
+tf.app.flags.DEFINE_integer('epochs',        100, """epoch count""")
 tf.app.flags.DEFINE_integer('truncate',      200, """truncate input sequences to this length""")
 tf.app.flags.DEFINE_string('data_dir',       "/mnt/permanent/Home/nessie/velkey/data/", """data store basedir""")
 tf.app.flags.DEFINE_string('log_dir',        "/mnt/permanent/Home/nessie/velkey/logs/", """logging directory root""")
-tf.app.flags.DEFINE_string('run_name',       "ce_b256_3x100_static_trun200_ADAM_lr005", """naming: loss_fn, batch size, architecture, optimizer""")
+tf.app.flags.DEFINE_string('run_name',       "sentence_3x128_static_conv_128_64_1_trun200", """naming: loss_fn, batch size, architecture, optimizer""")
 tf.app.flags.DEFINE_string('data_type',      "sentence/", """can be sentence/, word/""")
 tf.app.flags.DEFINE_string('model',          "lstm", """can be lstm, convlstm""")
 
@@ -109,7 +109,7 @@ labels = y
 #lstm = Conv1DLSTMCell(input_shape=[vsize,1], output_channels=units, kernel_shape=[kernel_size])
 
 if FLAGS.model == "lstm":
-    num_units = [100, 100, 100]
+    num_units = [128, 128, 128]
     
     with tf.variable_scope("fw"):
         fw_cells = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.BasicLSTMCell(num_units=units) for units in num_units])
@@ -118,10 +118,12 @@ if FLAGS.model == "lstm":
     outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw=fw_cells, cell_bw=bw_cells, inputs=x, dtype=tf.float32)
     
     RNN_out = tf.concat(outputs, -1)
-    filters = tf.get_variable(shape=[1,200,1], dtype=tf.float32, name="filters")
-    bias = tf.get_variable(shape=[1], dtype=tf.float32, name="bias")
-
-    logits = tf.nn.conv1d(RNN_out,filters=filters,stride=1,padding='SAME') + bias
+    
+    layer_0 = tf.layers.conv1d(RNN_out, 1, 5, activation=tf.nn.sigmoid, padding='same')
+    #layer_1 = tf.layers.conv1d(layer_0, 64, 3, activation=tf.nn.sigmoid, padding='same')
+    #layer_2 = tf.layers.conv1d(layer_1, 1, 1, activation=tf.nn.sigmoid, padding='same')
+    logits = layer_0
+    #logits = tf.nn.conv1d(RNN_out,filters=filters,stride=1,padding='SAME') + bias
     
 elif FLAGS.model == "convlstm":
     kernel_size = 20
@@ -134,7 +136,6 @@ elif FLAGS.model == "convlstm":
     
     outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw=fw_cells, cell_bw=bw_cells, inputs=x, dtype=tf.float32)
     outputs = tf.reshape(outputs,-1)
-
 
           
 predictions = tf.nn.sigmoid(logits)
@@ -272,7 +273,7 @@ class stopper():
             self.should_stop = True
         return self.should_stop
     
-early = stopper(20)
+early = stopper(40)
 steps = FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size)
 
 # run training
