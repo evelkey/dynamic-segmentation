@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 from segmentation.conv_lstm_cell import Conv1DLSTMCell
 
+FLAGS = tf.app.flags.FLAGS
 
 def model_information():
     total_parameters = 0
