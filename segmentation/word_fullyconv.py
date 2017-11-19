@@ -12,11 +12,11 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_integer('batch_size',    256, """batchsize""")
 tf.app.flags.DEFINE_integer('epochs',        30, """epoch count""")
 tf.app.flags.DEFINE_integer('workers',       1, """epoch count""")
-tf.app.flags.DEFINE_integer('truncate',      300, """truncate input sequences to this length""")
+tf.app.flags.DEFINE_integer('truncate',      30, """truncate input sequences to this length""")
 tf.app.flags.DEFINE_string('data_dir',       "/mnt/permanent/Home/nessie/velkey/data/", """data store basedir""")
-tf.app.flags.DEFINE_string('log_dir',        "/mnt/permanent/Home/nessie/velkey/logs/word/", """logging directory root""")
+tf.app.flags.DEFINE_string('log_dir',        "/mnt/permanent/Home/nessie/velkey/logs/word_conv/", """logging directory root""")
 tf.app.flags.DEFINE_string('run_name',       "", """""")
-tf.app.flags.DEFINE_string('model',          "lstm", """can be lstm, convlstm""")
+tf.app.flags.DEFINE_string('model',          "convlstm", """can be lstm, convlstm""")
 
 tf.app.flags.DEFINE_string('loss',           "crossentropy", """can be l1, l2, crossentropy""")
 tf.app.flags.DEFINE_string('optimizer',      "ADAM", """can be ADAM, RMS, SGD""")
@@ -25,11 +25,11 @@ tf.app.flags.DEFINE_float('learning_rate',   0.005, """starting learning rate"""
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 
-def train_convlstm_model(unit_list, kernel_sizes, output_channels):
+def train_convlstm_model(kernel_size, unit_list, kernel_sizes, output_channels):
     tf.reset_default_graph()
     sess = tf.Session(config=config)
     re = lambda x: x.replace(" ", "").replace("[", "_").replace("]", "_").replace(",","_")
-    NAME = "word_lstm_" + re(str(unit_list)) + "_conv_channel_" + re(str(output_channels)) + "_kernels_" + re(str(kernel_sizes))
+    NAME = "word_convlstm_" + re(str(unit_list)) + "_conv_channel_" + re(str(output_channels)) + "_kernels_" + re(str(kernel_sizes))
     
     store = Data(FLAGS.data_dir + "word/", FLAGS.truncate)
     
@@ -37,8 +37,7 @@ def train_convlstm_model(unit_list, kernel_sizes, output_channels):
     y = tf.placeholder(tf.int32, shape=(None, FLAGS.truncate, 1), name="input_y")
     labels = y
 
-
-    rnn = model.stacked_fc_bi_lstm(x, unit_list)
+    rnn = model.stacked_fully_conv_bi_lstm(x, kernel_size, unit_list, store.vsize)
 
     logits = model.convolutional_output(rnn, output_channels, kernel_sizes)
     predictions = tf.nn.sigmoid(logits, name='output_probs')
@@ -160,7 +159,7 @@ def train_convlstm_model(unit_list, kernel_sizes, output_channels):
     print("loss: ", l, " accuracy: ", a, "% recall: ", r, "fscore", f, " word_acc: ", w, "%")
     # log test losses:
     with open(FLAGS.log_dir + "hyper.log", "a") as myfile:
-        myfile.write(FLAGS.log_dir + NAME + "\t" + str(l) + "\t" + str(a) + "\t" + str(r) +"\t" +  str(f)+"\t" +  str(w) )
+        myfile.write("\n" + FLAGS.log_dir + NAME + "\t" + str(l) + "\t" + str(a) + "\t" + str(r) +"\t" +  str(f)+"\t" +  str(w) )
     writer.flush()
     sess.close()
 
@@ -168,12 +167,15 @@ def train_convlstm_model(unit_list, kernel_sizes, output_channels):
 
 
 def sample_hyper():
+    recurrent_kernel = [20, 30, 60, 90]
     kernel_opt = [1, 3, 5, 7, 9]
-    ch_opt = [20, 80, 120, 200]
+    ch_opt = [4, 8, 16, 32, 64]
     unit_opt = [64, 128, 256]
 
-    lstm_depth_range = (1, 5)
-    conv_depth_range = (1, 5)
+    lstm_depth_range = (1, 3)
+    conv_depth_range = (1, 3)
+    
+    kern = random.choice(recurrent_kernel)
 
     num_units = [random.choice(unit_opt)]
     for lstm_cell in range(random.randint(*lstm_depth_range)):
@@ -187,10 +189,10 @@ def sample_hyper():
 
     channels[-1] = 1
 
-    return kernels, channels, num_units
+    return kernels, channels, num_units, kern
 
 def train(settings):
-    return train_convlstm_model(unit_list=settings[2], kernel_sizes=settings[0], output_channels=settings[1])
+    return train_convlstm_model(kernel_size=settings[3], unit_list=settings[2], kernel_sizes=settings[0], output_channels=settings[1])
 
 def hyperopt(workers=2):
     from multiprocessing import Pool
@@ -206,7 +208,7 @@ def hyperopt(workers=2):
 
 def main(argv=None):
     hyperopt(FLAGS.workers)
-    #train_convlstm_model(unit_list=[128,128,128], kernel_sizes=[5,3,1], output_channels=[100,20,1])
+    #train_convlstm_model(kernel_size=40, unit_list=[128,128,128], kernel_sizes=[5,3,1], output_channels=[100,20,1])
 
 
 if __name__ == "__main__":
