@@ -23,7 +23,7 @@ def model_information():
 def convolutional_output(input_tensor, outputs, filter_sizes):
     temp = input_tensor
     for out, filt in list(zip(outputs, filter_sizes))[:-1]:
-        temp = tf.layers.conv1d(temp, out, filt, activation=tf.nn.sigmoid, padding='same')
+        temp = tf.layers.conv1d(temp, out, filt, activation=tf.nn.relu, padding='same')
     return tf.layers.conv1d(temp, outputs[-1], filter_sizes[-1], activation=None, padding='same')
 
 

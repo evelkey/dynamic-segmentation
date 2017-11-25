@@ -233,8 +233,8 @@ def hyperopt(workers=2):
 
 
 def main(argv=None):
-    hyperopt(FLAGS.workers)
-    # train_convlstm_model(unit_list=[128,128,128], kernel_sizes=[5,3,1], output_channels=[100,20,1])
+    #hyperopt(FLAGS.workers)
+    train_convlstm_model(unit_list=[256,256,256], kernel_sizes=[9,7,3,1], output_channels=[100,64,32,1])
 
 
 if __name__ == "__main__":

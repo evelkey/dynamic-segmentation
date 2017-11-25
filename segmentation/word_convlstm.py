@@ -10,7 +10,7 @@ import segmentation.tools as tools
 
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_integer('batch_size',    256, """batchsize""")
-tf.app.flags.DEFINE_integer('epochs',        30, """epoch count""")
+tf.app.flags.DEFINE_integer('epochs',        100, """epoch count""")
 tf.app.flags.DEFINE_integer('workers',       1, """epoch count""")
 tf.app.flags.DEFINE_integer('truncate',      30, """truncate input sequences to this length""")
 tf.app.flags.DEFINE_string('data_dir',       "/mnt/permanent/Home/nessie/velkey/data/", """data store basedir""")
@@ -132,7 +132,7 @@ def train_convlstm_model(unit_list, kernel_sizes, output_channels):
         return l, a, r, f, word_acc
 
 
-    early = tools.Stopper(30)
+    early = tools.Stopper(200)
     steps = FLAGS.epochs * int(store.size["train"] / FLAGS.batch_size)
 
     # run training
@@ -205,8 +205,8 @@ def hyperopt(workers=2):
 
 
 def main(argv=None):
-    hyperopt(FLAGS.workers)
-    #train_convlstm_model(unit_list=[128,128,128], kernel_sizes=[5,3,1], output_channels=[100,20,1])
+    #hyperopt(FLAGS.workers)
+    train_convlstm_model(unit_list=[256, 256], kernel_sizes=[9,5,3, 3,3,3,  1], output_channels=[120, 64,64,32,32, 32, 1])
 
 
 if __name__ == "__main__":
